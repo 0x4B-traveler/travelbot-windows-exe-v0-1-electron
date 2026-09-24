@@ -1,0 +1,9 @@
+.inline-actions,
+.assistant-row { display: flex; gap: 10px; align-items: center; }
+.assistant-row input { flex: 1; }
+.preview-box,
+.confirm-box { margin-top: 14px; padding: 14px; border: 1px solid rgba(80, 213, 201, .35); border-radius: 12px; background: rgba(31, 76, 91, .22); }
+.preview-box p,
+.confirm-box p { margin: 7px 0 0; white-space: pre-line; color: #b4c8d8; }
+.secondary { border: 1px solid #2b5870; background: #102536; color: #c3d7e4; border-radius: 9px; padding: 12px 19px; font: 700 12px Manrope; cursor: pointer; }
+.secondary:hover { border-color: #53d7ca; background: #174554; }

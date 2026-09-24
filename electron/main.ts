@@ -3,6 +3,10 @@ import { execFile, spawn, ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import type { ContentKind, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
+import { TravelDatabase } from './services/database';
+import { createWeatherGreeting, OpenMeteoWeatherProvider } from './services/weather';
+import { parseNaturalLanguage } from './services/natural-language';
 
 const execFileAsync = promisify(execFile);
 let mainWindow: BrowserWindow | null = null;
@@ -11,6 +15,10 @@ let tray: Tray | null = null;
 let quitting = false;
 let scheduleTimer: NodeJS.Timeout | null = null;
 let scheduleSending = false;
+let weatherTimer: NodeJS.Timeout | null = null;
+let weatherSending = false;
+let travelDatabase: TravelDatabase | null = null;
+const weatherProvider = new OpenMeteoWeatherProvider();
 type ScheduleSettings = { enabled: boolean; groupNames: string[]; chatIds: string[]; intervalMinutes: number; message: string; lastRun?: string; lastResult?: string };
 type CachedGroup = { name: string; lastTime?: string; chatId?: string };
 const defaultSettings: ScheduleSettings = { enabled: false, groupNames: [], chatIds: [], intervalMinutes: 60, message: 'TravelBot 定时通知', lastResult: '未启动' };
@@ -28,9 +36,28 @@ async function sendToChat(chatId: string, content: string) {
 }
 function stopSchedule() { if (scheduleTimer) clearInterval(scheduleTimer); scheduleTimer = null; }
 function startSchedule() { stopSchedule(); const settings = loadSettings(); if (!settings.enabled || !settings.chatIds.length) return; scheduleTimer = setInterval(async () => { if (scheduleSending) return; scheduleSending = true; try { const current = loadSettings(); let sent = 0; let failure = ''; for (const chatId of current.chatIds) { const result = await sendToChat(chatId, current.message); if (result.ok) sent += 1; else { failure = result.stderr || '发送失败'; break; } } current.lastRun = new Date().toISOString(); current.lastResult = failure || `发送成功（${sent}/${current.chatIds.length} 个群聊）`; saveSettings(current); } finally { scheduleSending = false; } }, Math.max(1, settings.intervalMinutes) * 60 * 1000); }
+function stopWeatherSchedule() { if (weatherTimer) clearInterval(weatherTimer); weatherTimer = null; }
+async function runWeatherJob(): Promise<{ ok: boolean; stderr?: string; greeting?: ReturnType<typeof createWeatherGreeting> }> {
+  if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化' };
+  const job = travelDatabase.getWeatherJob();
+  if (!job.location || !job.chatIds.length) return { ok: false, stderr: '请先配置天气位置和目标群聊' };
+  try {
+    const greeting = createWeatherGreeting(await weatherProvider.getCurrent(job.location));
+    let sent = 0;
+    for (const chatId of job.chatIds) { const result = await sendToChat(chatId, greeting.message); if (!result.ok) throw new Error(result.stderr || '天气问候发送失败'); sent += 1; }
+    travelDatabase.saveWeatherJob({ ...job, lastSentAt: new Date().toISOString(), lastResult: `发送成功（${sent}/${job.chatIds.length} 个群聊）` });
+    return { ok: true, greeting };
+  } catch (error: any) {
+    travelDatabase.saveWeatherJob({ ...job, lastSentAt: new Date().toISOString(), lastResult: error?.message || '天气任务失败' });
+    return { ok: false, stderr: error?.message || '天气任务失败' };
+  }
+}
+function startWeatherSchedule() { stopWeatherSchedule(); const job = travelDatabase?.getWeatherJob(); if (!job?.enabled || !job.location || !job.chatIds.length) return; weatherTimer = setInterval(async () => { if (weatherSending) return; weatherSending = true; try { await runWeatherJob(); } finally { weatherSending = false; } }, Math.max(1, job.intervalMinutes) * 60 * 1000); }
 
 function cliInvocation(args: string[]) {
+  const packagedBinary = join(process.resourcesPath, 'wecom-cli.exe');
   const unpackedBinary = join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', '@wecom', 'cli-win32-x64', 'bin', 'wecom-cli.exe');
+  if (process.platform === 'win32' && existsSync(packagedBinary)) return { file: packagedBinary, args };
   if (process.platform === 'win32' && existsSync(unpackedBinary)) return { file: unpackedBinary, args };
   const script = join(app.getAppPath(), 'node_modules', '@wecom', 'cli', 'bin', 'wecom.js');
   return { file: process.execPath, args: [script, ...args] };
@@ -105,6 +132,47 @@ ipcMain.handle('send-test', async (_event, content: string, groupIds: string[]) 
   return { ok: true, stdout: `已发送到 ${targets.length} 个群聊`, stderr: '' };
 });
 ipcMain.handle('open-image', async (_event, path: string) => { await shell.openPath(path); return true; });
+ipcMain.handle('weather-preview', async (_event, location: string) => {
+  try {
+    const snapshot = await weatherProvider.getCurrent(location);
+    return { ok: true, greeting: createWeatherGreeting(snapshot) };
+  } catch (error: any) {
+    return { ok: false, stderr: error?.message || '天气获取失败' };
+  }
+});
+ipcMain.handle('get-weather-job', async () => travelDatabase?.getWeatherJob() ?? { id: 'default', location: '', chatIds: [], intervalMinutes: 60, enabled: false });
+ipcMain.handle('save-weather-job', async (_event, input: Omit<WeatherJobSettings, 'id' | 'lastSentAt' | 'lastResult'>) => {
+  if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化' };
+  const job = travelDatabase.saveWeatherJob(input);
+  startWeatherSchedule();
+  return { ok: true, job };
+});
+ipcMain.handle('run-weather-job', async () => runWeatherJob());
+ipcMain.handle('content-search', async (_event, input: { query: string; kind?: ContentKind }) => {
+  if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化', items: [] };
+  return { ok: true, items: travelDatabase.searchContent(input.query, input.kind) };
+});
+ipcMain.handle('content-command', async (_event, text: string) => {
+  if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化' };
+  const command = parseNaturalLanguage(text);
+  if (command.intent === 'search') return { ok: true, command, items: travelDatabase.searchContent(command.query) };
+  return { ok: true, command, requiresConfirmation: command.intent !== 'unknown' };
+});
+ipcMain.handle('content-confirm', async (_event, input: { command: NaturalLanguageCommand; confirmed: boolean }) => {
+  if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化' };
+  if (!input.confirmed) return { ok: false, cancelled: true, stderr: '操作已取消' };
+  const command = input.command;
+  if (command.intent === 'create') return { ok: true, item: travelDatabase.createContent({ kind: command.kind, title: command.title, body: command.body }) };
+  if (command.intent === 'delete' || command.intent === 'update') {
+    const matches = travelDatabase.searchContent(command.query);
+    if (matches.length !== 1) return { ok: false, stderr: matches.length ? '匹配到多条内容，请提供更明确的标题' : '没有找到对应内容' };
+    const item = matches[0];
+    if (command.intent === 'delete') return { ok: travelDatabase.deleteContent(item.id), deletedId: item.id };
+    return { ok: true, item: travelDatabase.updateContent(item.id, { body: command.body }) };
+  }
+  return { ok: false, stderr: '该命令不需要确认或暂不支持' };
+});
 
-app.whenReady().then(() => { createWindow(); tray = new Tray(nativeImage.createEmpty()); tray.setToolTip('TravelBot'); tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开 TravelBot', click: () => { mainWindow?.show(); mainWindow?.focus(); } }, { label: '退出', click: () => { quitting = true; app.quit(); } }])); tray.on('click', () => { mainWindow?.show(); mainWindow?.focus(); }); startSchedule(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); }); });
+app.whenReady().then(() => { travelDatabase = new TravelDatabase(join(app.getPath('userData'), 'travelbot.sqlite')); createWindow(); tray = new Tray(nativeImage.createEmpty()); tray.setToolTip('TravelBot'); tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开 TravelBot', click: () => { mainWindow?.show(); mainWindow?.focus(); } }, { label: '退出', click: () => { quitting = true; app.quit(); } }])); tray.on('click', () => { mainWindow?.show(); mainWindow?.focus(); }); startSchedule(); startWeatherSchedule(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); }); });
+app.on('before-quit', () => { stopWeatherSchedule(); travelDatabase?.close(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !tray) app.quit(); });
