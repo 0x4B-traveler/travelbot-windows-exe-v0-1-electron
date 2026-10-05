@@ -3,8 +3,10 @@ import { execFile, spawn, ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { ContentKind, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
+import type { ContentKind, GroupMessageConfigInput, GroupMessageRecord, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
 import { TravelDatabase } from './services/database';
+import { GroupMessageStore } from './services/group-message-store';
+import { WeComCustomerGroupApi } from './services/wecom-api';
 import { createWeatherGreeting, OpenMeteoWeatherProvider } from './services/weather';
 import { parseNaturalLanguage } from './services/natural-language';
 
@@ -18,10 +20,14 @@ let scheduleSending = false;
 let weatherTimer: NodeJS.Timeout | null = null;
 let weatherSending = false;
 let travelDatabase: TravelDatabase | null = null;
+let groupMessageStore: GroupMessageStore | null = null;
+let customerGroupApi: WeComCustomerGroupApi | null = null;
 const weatherProvider = new OpenMeteoWeatherProvider();
-type ScheduleSettings = { enabled: boolean; groupNames: string[]; chatIds: string[]; intervalMinutes: number; message: string; lastRun?: string; lastResult?: string };
+// channel：bot = 通过 wecom-cli 智能机器人直接发送；groupmsg = 通过群发助手创建客户群群发任务
+type ScheduleChannel = 'bot' | 'groupmsg';
+type ScheduleSettings = { enabled: boolean; channel: ScheduleChannel; groupNames: string[]; chatIds: string[]; customerChatIds: string[]; intervalMinutes: number; message: string; lastRun?: string; lastResult?: string };
 type CachedGroup = { name: string; lastTime?: string; chatId?: string };
-const defaultSettings: ScheduleSettings = { enabled: false, groupNames: [], chatIds: [], intervalMinutes: 60, message: 'TravelBot 定时通知', lastResult: '未启动' };
+const defaultSettings: ScheduleSettings = { enabled: false, channel: 'bot', groupNames: [], chatIds: [], customerChatIds: [], intervalMinutes: 60, message: 'TravelBot 定时通知', lastResult: '未启动' };
 function settingsPath() { return join(app.getPath('userData'), 'travelbot-settings.json'); }
 function loadSettings(): ScheduleSettings { try { const raw = JSON.parse(readFileSync(settingsPath(), 'utf8')); return { ...defaultSettings, ...raw, groupNames: raw.groupNames ?? (raw.groupName ? [raw.groupName] : []), chatIds: raw.chatIds ?? (raw.chatId ? [raw.chatId] : []) }; } catch { return { ...defaultSettings }; } }
 function saveSettings(settings: ScheduleSettings) { mkdirSync(app.getPath('userData'), { recursive: true }); writeFileSync(settingsPath(), JSON.stringify(settings, null, 2), 'utf8'); }
@@ -34,8 +40,24 @@ async function sendToChat(chatId: string, content: string) {
     return { ok: false, stdout: result.stdout, stderr: body?.errmsg || body?.message || '企业微信接口未确认消息发送成功' };
   } catch { return { ok: false, stdout: result.stdout, stderr: '发送接口返回了无法解析的业务结果' }; }
 }
+async function sendGroupMessage(chatIds: string[], content: string, source: GroupMessageRecord['source']) {
+  if (!groupMessageStore || !customerGroupApi) return { ok: false, stderr: '群发模块尚未初始化' };
+  const sender = groupMessageStore.senderUserId();
+  if (!sender) return { ok: false, stderr: '请先配置发送人 userid' };
+  if (!chatIds.length) return { ok: false, stderr: '请先选择至少一个客户群' };
+  if (!content.trim()) return { ok: false, stderr: '群发内容不能为空' };
+  try {
+    const { msgid, failList } = await customerGroupApi.createGroupMessage({ sender, chatIds, content });
+    const record: GroupMessageRecord = { msgid, createdAt: new Date().toISOString(), sender, chatIds, content, source };
+    groupMessageStore.addHistory(record);
+    return { ok: true, record, failList };
+  } catch (error: any) {
+    return { ok: false, stderr: error?.message || '创建群发任务失败' };
+  }
+}
 function stopSchedule() { if (scheduleTimer) clearInterval(scheduleTimer); scheduleTimer = null; }
-function startSchedule() { stopSchedule(); const settings = loadSettings(); if (!settings.enabled || !settings.chatIds.length) return; scheduleTimer = setInterval(async () => { if (scheduleSending) return; scheduleSending = true; try { const current = loadSettings(); let sent = 0; let failure = ''; for (const chatId of current.chatIds) { const result = await sendToChat(chatId, current.message); if (result.ok) sent += 1; else { failure = result.stderr || '发送失败'; break; } } current.lastRun = new Date().toISOString(); current.lastResult = failure || `发送成功（${sent}/${current.chatIds.length} 个群聊）`; saveSettings(current); } finally { scheduleSending = false; } }, Math.max(1, settings.intervalMinutes) * 60 * 1000); }
+function scheduleTargets(settings: ScheduleSettings) { return settings.channel === 'groupmsg' ? settings.customerChatIds : settings.chatIds; }
+function startSchedule() { stopSchedule(); const settings = loadSettings(); if (!settings.enabled || !scheduleTargets(settings).length) return; scheduleTimer = setInterval(async () => { if (scheduleSending) return; scheduleSending = true; try { const current = loadSettings(); if (current.channel === 'groupmsg') { const result = await sendGroupMessage(current.customerChatIds, current.message, 'schedule'); current.lastRun = new Date().toISOString(); current.lastResult = result.ok ? `已创建群发任务（${current.customerChatIds.length} 个客户群），等待发送人确认` : (result.stderr || '创建群发任务失败'); saveSettings(current); return; } let sent = 0; let failure = ''; for (const chatId of current.chatIds) { const result = await sendToChat(chatId, current.message); if (result.ok) sent += 1; else { failure = result.stderr || '发送失败'; break; } } current.lastRun = new Date().toISOString(); current.lastResult = failure || `发送成功（${sent}/${current.chatIds.length} 个群聊）`; saveSettings(current); } finally { scheduleSending = false; } }, Math.max(1, settings.intervalMinutes) * 60 * 1000); }
 function stopWeatherSchedule() { if (weatherTimer) clearInterval(weatherTimer); weatherTimer = null; }
 async function runWeatherJob(): Promise<{ ok: boolean; stderr?: string; greeting?: ReturnType<typeof createWeatherGreeting> }> {
   if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化' };
@@ -101,10 +123,16 @@ function createWindow() {
 ipcMain.handle('auth-status', async () => runCli(['auth', 'show', '--status']));
 ipcMain.handle('list-groups', async () => { const result = await listSessions(); return { ...result, groups: result.groups.map((group: CachedGroup) => ({ id: group.chatId, name: group.name, lastTime: group.lastTime })) }; });
 ipcMain.handle('get-settings', async () => loadSettings());
-ipcMain.handle('save-schedule', async (_event, input: { enabled: boolean; groupIds: string[]; groupNames: string[]; intervalMinutes: number; message: string }) => {
+ipcMain.handle('save-schedule', async (_event, input: { enabled: boolean; channel?: ScheduleChannel; groupIds: string[]; groupNames: string[]; customerChatIds?: string[]; intervalMinutes: number; message: string }) => {
+  if (input.channel === 'groupmsg') {
+    if (input.enabled && !groupMessageStore?.credentials()) return { ok: false, stderr: '请先完成客户群群发配置（企业 ID、Secret、发送人）' };
+    if (input.enabled && !input.customerChatIds?.length) return { ok: false, stderr: '请先选择至少一个客户群' };
+    const settings: ScheduleSettings = { ...loadSettings(), enabled: input.enabled, channel: 'groupmsg', customerChatIds: input.customerChatIds ?? [], intervalMinutes: Math.max(1, Number(input.intervalMinutes) || 60), message: input.message };
+    saveSettings(settings); if (settings.enabled) startSchedule(); else stopSchedule(); return { ok: true, settings };
+  }
   const sessions = await listSessions(); const targets = sessions.groups.filter((group: CachedGroup) => input.groupIds.includes(group.chatId || ''));
   if (input.enabled && targets.length !== input.groupIds.length) return { ok: false, stderr: '部分目标群聊已不在当前可发送会话列表中，请刷新后重选' };
-  const previous = loadSettings(); const settings: ScheduleSettings = { ...previous, enabled: input.enabled, groupNames: input.groupNames, chatIds: targets.map(target => target.chatId!).filter(Boolean), intervalMinutes: Math.max(1, Number(input.intervalMinutes) || 60), message: input.message };
+  const previous = loadSettings(); const settings: ScheduleSettings = { ...previous, enabled: input.enabled, channel: 'bot', groupNames: input.groupNames, chatIds: targets.map(target => target.chatId!).filter(Boolean), intervalMinutes: Math.max(1, Number(input.intervalMinutes) || 60), message: input.message };
   saveSettings(settings); if (settings.enabled) startSchedule(); else stopSchedule(); return { ok: true, settings };
 });
 ipcMain.handle('auth-start', async () => {
@@ -130,6 +158,27 @@ ipcMain.handle('send-test', async (_event, content: string, groupIds: string[]) 
   if (targets.length !== groupIds.length) return { ok: false, step: 'sessions', stderr: '部分目标群聊已不在当前可发送会话列表中，请刷新后重选。' };
   for (const target of targets) { const result = await sendToChat(target.chatId!, content); if (!result.ok) return { ...result, stderr: `${target.name}：${result.stderr || '发送失败'}` }; }
   return { ok: true, stdout: `已发送到 ${targets.length} 个群聊`, stderr: '' };
+});
+ipcMain.handle('groupmsg-get-config', async () => groupMessageStore?.getConfigView());
+ipcMain.handle('groupmsg-save-config', async (_event, input: GroupMessageConfigInput) => {
+  if (!groupMessageStore) return { ok: false, stderr: '群发模块尚未初始化' };
+  try { const config = groupMessageStore.saveConfig(input); customerGroupApi?.reset(); return { ok: true, config }; }
+  catch (error: any) { return { ok: false, stderr: error?.message || '保存配置失败' }; }
+});
+ipcMain.handle('groupmsg-list-groups', async () => {
+  if (!groupMessageStore || !customerGroupApi) return { ok: false, stderr: '群发模块尚未初始化', groups: [] };
+  const sender = groupMessageStore.senderUserId();
+  if (!sender) return { ok: false, stderr: '请先配置发送人 userid', groups: [] };
+  // 群发任务只能发到发送人作为群主的客户群，因此按群主过滤
+  try { return { ok: true, groups: await customerGroupApi.listCustomerGroups([sender]) }; }
+  catch (error: any) { return { ok: false, stderr: error?.message || '客户群列表加载失败', groups: [] }; }
+});
+ipcMain.handle('groupmsg-send', async (_event, input: { chatIds: string[]; content: string }) => sendGroupMessage(input.chatIds, input.content, 'manual'));
+ipcMain.handle('groupmsg-history', async () => groupMessageStore?.listHistory() ?? []);
+ipcMain.handle('groupmsg-result', async (_event, msgid: string) => {
+  if (!customerGroupApi) return { ok: false, stderr: '群发模块尚未初始化' };
+  try { return { ok: true, result: await customerGroupApi.getGroupMessageResult(msgid) }; }
+  catch (error: any) { return { ok: false, stderr: error?.message || '查询群发结果失败' }; }
 });
 ipcMain.handle('open-image', async (_event, path: string) => { await shell.openPath(path); return true; });
 ipcMain.handle('weather-preview', async (_event, location: string) => {
@@ -173,6 +222,6 @@ ipcMain.handle('content-confirm', async (_event, input: { command: NaturalLangua
   return { ok: false, stderr: '该命令不需要确认或暂不支持' };
 });
 
-app.whenReady().then(() => { travelDatabase = new TravelDatabase(join(app.getPath('userData'), 'travelbot.sqlite')); createWindow(); tray = new Tray(nativeImage.createEmpty()); tray.setToolTip('TravelBot'); tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开 TravelBot', click: () => { mainWindow?.show(); mainWindow?.focus(); } }, { label: '退出', click: () => { quitting = true; app.quit(); } }])); tray.on('click', () => { mainWindow?.show(); mainWindow?.focus(); }); startSchedule(); startWeatherSchedule(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); }); });
+app.whenReady().then(() => { travelDatabase = new TravelDatabase(join(app.getPath('userData'), 'travelbot.sqlite')); groupMessageStore = new GroupMessageStore(app.getPath('userData')); const store = groupMessageStore; customerGroupApi = new WeComCustomerGroupApi(() => store.credentials()); createWindow(); tray = new Tray(nativeImage.createEmpty()); tray.setToolTip('TravelBot'); tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开 TravelBot', click: () => { mainWindow?.show(); mainWindow?.focus(); } }, { label: '退出', click: () => { quitting = true; app.quit(); } }])); tray.on('click', () => { mainWindow?.show(); mainWindow?.focus(); }); startSchedule(); startWeatherSchedule(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); }); });
 app.on('before-quit', () => { stopWeatherSchedule(); travelDatabase?.close(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !tray) app.quit(); });

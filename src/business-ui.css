@@ -7,3 +7,8 @@
 .confirm-box p { margin: 7px 0 0; white-space: pre-line; color: #b4c8d8; }
 .secondary { border: 1px solid #2b5870; background: #102536; color: #c3d7e4; border-radius: 9px; padding: 12px 19px; font: 700 12px Manrope; cursor: pointer; }
 .secondary:hover { border-color: #53d7ca; background: #174554; }
+
+.groupmsg-card input[type=password],.groupmsg-card select{width:100%;background:#08121f;border:1px solid #263c55;border-radius:8px;color:#e8eef7;padding:11px;font:13px Manrope;margin-bottom:14px;outline:none}
+.groupmsg-card input[type=password]:focus,.groupmsg-card select:focus{border-color:#53d7ca}
+.groupmsg-card .preview-box{margin-bottom:10px}
+.channel-row{display:flex;gap:18px;margin-bottom:14px}

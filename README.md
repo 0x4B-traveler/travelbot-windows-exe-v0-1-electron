@@ -34,6 +34,23 @@ TravelBot Windows 是一个基于 Electron、React 和 TypeScript 的企业微�
 - `natural-language.ts`：将“查询/新增/修改/删除”类中文消息解析为结构化命令；写操作默认要求二次确认。
 - Electron IPC：已暴露天气预览、内容搜索、自然语言解析和确认执行接口，UI 可在后续独立接入。
 
+## 客户群群发（群发助手）
+
+`wecom-api.ts` 直接调用企业微信服务端接口，把预设内容通过“客户群群发”发到客户群：
+
+1. `gettoken`：用企业 ID 和客户联系 Secret 获取 access_token（主进程内缓存，不暴露给界面）。
+2. `externalcontact/groupchat/list` + `groupchat/get`：列出发送人作为群主的客户群。
+3. `externalcontact/add_msg_template`（`chat_type=group`）：创建群发任务，发送人在企业微信中收到通知并确认后发出。
+4. `externalcontact/get_groupmsg_task` / `get_groupmsg_send_result`：查询确认状态和各群发送结果。
+
+使用前需要在界面“客户群群发”中填写：
+
+- 企业 ID（corpid）
+- 客户联系 Secret（管理后台 → 客户与上下游 → 客户联系 → API；或开通了客户联系权限的自建应用 Secret）
+- 发送人 userid（客户群群主，需在客户联系使用范围内）
+
+Secret 通过 Electron `safeStorage`（Windows DPAPI）加密后保存在 `userData/wecom-groupmsg-config.json`。运行本程序的电脑公网 IP 必须加入该应用的“企业可信 IP”，否则接口返回 60020。后台定时发送可切换为“群发助手”通道，按间隔自动创建群发任务；企业微信对客户群群发有频率限制，建议按天发送。
+
 ## 数据边界
 
 SQLite 文件和企业微信凭证都保存在 Electron 的 `userData` 目录，不写入项目目录。图片文件暂时只预留 `media_assets` 表，下一步接入图片导入和预览。
