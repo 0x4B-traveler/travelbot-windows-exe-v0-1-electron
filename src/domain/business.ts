@@ -92,3 +92,45 @@ export type GroupMessageRecord = {
   content: string;
   source: 'manual' | 'schedule';
 };
+
+export type WeatherForecast = {
+  location: string;
+  /** 本地日期 YYYY-MM-DD */
+  date: string;
+  weatherCode: number;
+  maxC: number;
+  minC: number;
+  precipitationProbability?: number;
+};
+
+/** 每日客户群推送：每天固定时刻生成“天气预报 + 今日推荐”，按群主各创建一个群发任务。 */
+export type DailyPushTarget = { chatId: string; owner: string; name: string };
+
+export type DailyPushSettings = {
+  enabled: boolean;
+  /** 本地时间 HH:mm */
+  sendTime: string;
+  includeWeather: boolean;
+  location: string;
+  includeRecommendation: boolean;
+  /** 附加在消息末尾的固定文字，可留空 */
+  footer: string;
+  /** 群主 userid，客户群列表按这些群主加载 */
+  ownerUserIds: string[];
+  targets: DailyPushTarget[];
+  launchAtLogin: boolean;
+};
+
+export type DailyPushState = {
+  /** 最近一次成功处理的本地日期 YYYY-MM-DD */
+  lastRunDate?: string;
+  /** 当天已成功创建任务的群主，用于部分失败时只重试剩余群主 */
+  doneOwners: string[];
+  attemptDate?: string;
+  attempts: number;
+  lastAttemptAt?: string;
+  lastRecommendationId?: string;
+  lastResult?: string;
+};
+
+export type DailyPushView = DailyPushSettings & { state: DailyPushState; nextRunAt?: string };

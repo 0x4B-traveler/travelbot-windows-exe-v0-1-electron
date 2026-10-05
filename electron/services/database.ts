@@ -94,6 +94,12 @@ export class TravelDatabase {
     return row ? toContentItem(row) : null;
   }
 
+  /** 按创建顺序列出全部内容，用于每日推荐轮换（编辑内容不会打乱顺序）。 */
+  listContentForRotation(): ContentItem[] {
+    const rows = this.db.prepare('SELECT * FROM content_items ORDER BY created_at ASC, id ASC').all() as unknown as ContentRow[];
+    return rows.map(toContentItem);
+  }
+
   getWeatherJob(): WeatherJobSettings {
     const row = this.db.prepare('SELECT * FROM weather_jobs WHERE id = ?').get('default') as unknown as WeatherJobRow | undefined;
     if (!row) return { id: 'default', location: '', chatIds: [], intervalMinutes: 60, enabled: false };

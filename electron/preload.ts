@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ContentKind, GroupMessageConfigInput, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
+import type { ContentKind, DailyPushSettings, GroupMessageConfigInput, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
 
 contextBridge.exposeInMainWorld('travelbot', {
   authStatus: () => ipcRenderer.invoke('auth-status'),
@@ -22,4 +22,9 @@ contextBridge.exposeInMainWorld('travelbot', {
   sendGroupMessage: (input: { chatIds: string[]; content: string }) => ipcRenderer.invoke('groupmsg-send', input),
   groupMessageHistory: () => ipcRenderer.invoke('groupmsg-history'),
   groupMessageResult: (msgid: string) => ipcRenderer.invoke('groupmsg-result', msgid),
+  dailyPush: () => ipcRenderer.invoke('daily-get'),
+  saveDailyPush: (input: DailyPushSettings) => ipcRenderer.invoke('daily-save', input),
+  dailyPushGroups: (ownerUserIds: string[]) => ipcRenderer.invoke('daily-list-groups', ownerUserIds),
+  previewDailyPush: (input?: DailyPushSettings) => ipcRenderer.invoke('daily-preview', input),
+  runDailyPush: () => ipcRenderer.invoke('daily-run'),
 });

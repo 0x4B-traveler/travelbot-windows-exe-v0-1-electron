@@ -3,11 +3,12 @@ import { execFile, spawn, ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { ContentKind, GroupMessageConfigInput, GroupMessageRecord, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
+import type { ContentKind, DailyPushSettings, GroupMessageConfigInput, GroupMessageRecord, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
 import { TravelDatabase } from './services/database';
 import { GroupMessageStore } from './services/group-message-store';
 import { WeComCustomerGroupApi } from './services/wecom-api';
-import { createWeatherGreeting, OpenMeteoWeatherProvider } from './services/weather';
+import { createWeatherGreeting, formatForecast, OpenMeteoWeatherProvider } from './services/weather';
+import { DailyPushRunner, DailyPushStore, parseSendTime } from './services/daily-push';
 import { parseNaturalLanguage } from './services/natural-language';
 
 const execFileAsync = promisify(execFile);
@@ -22,6 +23,10 @@ let weatherSending = false;
 let travelDatabase: TravelDatabase | null = null;
 let groupMessageStore: GroupMessageStore | null = null;
 let customerGroupApi: WeComCustomerGroupApi | null = null;
+let dailyPushStore: DailyPushStore | null = null;
+let dailyPushRunner: DailyPushRunner | null = null;
+let dailyPushTimer: NodeJS.Timeout | null = null;
+const startHidden = process.argv.includes('--hidden');
 const weatherProvider = new OpenMeteoWeatherProvider();
 // channel：bot = 通过 wecom-cli 智能机器人直接发送；groupmsg = 通过群发助手创建客户群群发任务
 type ScheduleChannel = 'bot' | 'groupmsg';
@@ -58,6 +63,17 @@ async function sendGroupMessage(chatIds: string[], content: string, source: Grou
 function stopSchedule() { if (scheduleTimer) clearInterval(scheduleTimer); scheduleTimer = null; }
 function scheduleTargets(settings: ScheduleSettings) { return settings.channel === 'groupmsg' ? settings.customerChatIds : settings.chatIds; }
 function startSchedule() { stopSchedule(); const settings = loadSettings(); if (!settings.enabled || !scheduleTargets(settings).length) return; scheduleTimer = setInterval(async () => { if (scheduleSending) return; scheduleSending = true; try { const current = loadSettings(); if (current.channel === 'groupmsg') { const result = await sendGroupMessage(current.customerChatIds, current.message, 'schedule'); current.lastRun = new Date().toISOString(); current.lastResult = result.ok ? `已创建群发任务（${current.customerChatIds.length} 个客户群），等待发送人确认` : (result.stderr || '创建群发任务失败'); saveSettings(current); return; } let sent = 0; let failure = ''; for (const chatId of current.chatIds) { const result = await sendToChat(chatId, current.message); if (result.ok) sent += 1; else { failure = result.stderr || '发送失败'; break; } } current.lastRun = new Date().toISOString(); current.lastResult = failure || `发送成功（${sent}/${current.chatIds.length} 个群聊）`; saveSettings(current); } finally { scheduleSending = false; } }, Math.max(1, settings.intervalMinutes) * 60 * 1000); }
+// 每分钟检查一次是否到了每日推送时刻；电脑休眠唤醒或程序晚启动时也能在补发窗口内补上。
+function startDailyPush() {
+  if (dailyPushTimer) clearInterval(dailyPushTimer);
+  const tick = () => { void dailyPushRunner?.tick().catch(() => { /* 结果已写入状态 */ }); };
+  dailyPushTimer = setInterval(tick, 60 * 1000);
+  tick();
+}
+function applyLaunchAtLogin(enabled: boolean) {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] });
+}
 function stopWeatherSchedule() { if (weatherTimer) clearInterval(weatherTimer); weatherTimer = null; }
 async function runWeatherJob(): Promise<{ ok: boolean; stderr?: string; greeting?: ReturnType<typeof createWeatherGreeting> }> {
   if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化' };
@@ -114,7 +130,7 @@ async function runCli(args: string[], options: { timeout?: number } = {}) {
 }
 
 function createWindow() {
-  mainWindow = new BrowserWindow({ width: 1120, height: 760, minWidth: 860, minHeight: 620, backgroundColor: '#08111f', webPreferences: { preload: join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
+  mainWindow = new BrowserWindow({ show: !startHidden, width: 1120, height: 760, minWidth: 860, minHeight: 620, backgroundColor: '#08111f', webPreferences: { preload: join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
   mainWindow.on('close', (event) => { if (!quitting) { event.preventDefault(); mainWindow?.hide(); } });
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) void mainWindow.loadURL(devUrl); else void mainWindow.loadFile(join(app.getAppPath(), 'dist', 'index.html'));
@@ -180,6 +196,30 @@ ipcMain.handle('groupmsg-result', async (_event, msgid: string) => {
   try { return { ok: true, result: await customerGroupApi.getGroupMessageResult(msgid) }; }
   catch (error: any) { return { ok: false, stderr: error?.message || '查询群发结果失败' }; }
 });
+ipcMain.handle('daily-get', async () => dailyPushStore?.view());
+ipcMain.handle('daily-save', async (_event, input: DailyPushSettings) => {
+  if (!dailyPushStore) return { ok: false, stderr: '每日推送模块尚未初始化' };
+  if (!parseSendTime(input.sendTime)) return { ok: false, stderr: '发送时间格式应为 HH:mm，例如 17:50' };
+  const ownerUserIds = [...new Set(input.ownerUserIds.map(id => id.trim()).filter(Boolean))];
+  const targets = input.targets.filter(target => target.chatId && target.owner);
+  if (input.enabled) {
+    if (!groupMessageStore?.credentials()) return { ok: false, stderr: '请先在“客户群群发”中配置企业 ID 和 Secret' };
+    if (!targets.length) return { ok: false, stderr: '请至少选择一个客户群' };
+    if (!(input.includeWeather && input.location.trim()) && !input.includeRecommendation) return { ok: false, stderr: '请至少启用天气或今日推荐' };
+  }
+  dailyPushStore.saveSettings({ ...input, sendTime: input.sendTime.trim(), location: input.location.trim(), ownerUserIds, targets });
+  applyLaunchAtLogin(input.launchAtLogin);
+  return { ok: true, view: dailyPushStore.view() };
+});
+ipcMain.handle('daily-list-groups', async (_event, ownerUserIds: string[]) => {
+  if (!customerGroupApi) return { ok: false, stderr: '群发模块尚未初始化', groups: [] };
+  const owners = [...new Set(ownerUserIds.map(id => id.trim()).filter(Boolean))];
+  if (!owners.length) return { ok: false, stderr: '请先填写至少一个群主 userid', groups: [] };
+  try { return { ok: true, groups: await customerGroupApi.listCustomerGroups(owners) }; }
+  catch (error: any) { return { ok: false, stderr: error?.message || '客户群列表加载失败', groups: [] }; }
+});
+ipcMain.handle('daily-preview', async (_event, input?: DailyPushSettings) => dailyPushRunner?.preview(input) ?? { ok: false, stderr: '每日推送模块尚未初始化' });
+ipcMain.handle('daily-run', async () => dailyPushRunner ? { ...(await dailyPushRunner.run()), view: dailyPushStore?.view() } : { ok: false, created: [], errors: [], message: '每日推送模块尚未初始化' });
 ipcMain.handle('open-image', async (_event, path: string) => { await shell.openPath(path); return true; });
 ipcMain.handle('weather-preview', async (_event, location: string) => {
   try {
@@ -222,6 +262,6 @@ ipcMain.handle('content-confirm', async (_event, input: { command: NaturalLangua
   return { ok: false, stderr: '该命令不需要确认或暂不支持' };
 });
 
-app.whenReady().then(() => { travelDatabase = new TravelDatabase(join(app.getPath('userData'), 'travelbot.sqlite')); groupMessageStore = new GroupMessageStore(app.getPath('userData')); const store = groupMessageStore; customerGroupApi = new WeComCustomerGroupApi(() => store.credentials()); createWindow(); tray = new Tray(nativeImage.createEmpty()); tray.setToolTip('TravelBot'); tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开 TravelBot', click: () => { mainWindow?.show(); mainWindow?.focus(); } }, { label: '退出', click: () => { quitting = true; app.quit(); } }])); tray.on('click', () => { mainWindow?.show(); mainWindow?.focus(); }); startSchedule(); startWeatherSchedule(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); }); });
-app.on('before-quit', () => { stopWeatherSchedule(); travelDatabase?.close(); });
+app.whenReady().then(() => { travelDatabase = new TravelDatabase(join(app.getPath('userData'), 'travelbot.sqlite')); groupMessageStore = new GroupMessageStore(app.getPath('userData')); const store = groupMessageStore; customerGroupApi = new WeComCustomerGroupApi(() => store.credentials()); const api = customerGroupApi; const database = travelDatabase; dailyPushStore = new DailyPushStore(app.getPath('userData')); dailyPushRunner = new DailyPushRunner(dailyPushStore, { getForecast: (location, offset) => weatherProvider.getDailyForecast(location, offset), formatForecast, listRecommendations: () => database.listContentForRotation(), createGroupMessage: input => api.createGroupMessage(input), addHistory: record => store.addHistory(record) }); createWindow(); tray = new Tray(nativeImage.createEmpty()); tray.setToolTip('TravelBot'); tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开 TravelBot', click: () => { mainWindow?.show(); mainWindow?.focus(); } }, { label: '退出', click: () => { quitting = true; app.quit(); } }])); tray.on('click', () => { mainWindow?.show(); mainWindow?.focus(); }); startSchedule(); startWeatherSchedule(); startDailyPush(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); }); });
+app.on('before-quit', () => { if (dailyPushTimer) clearInterval(dailyPushTimer); stopWeatherSchedule(); travelDatabase?.close(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !tray) app.quit(); });
