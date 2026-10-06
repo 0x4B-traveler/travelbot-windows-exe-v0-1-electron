@@ -168,9 +168,19 @@ ipcMain.handle('save-schedule', async (_event, input: { enabled: boolean; channe
   const previous = loadSettings(); const settings: ScheduleSettings = { ...previous, enabled: input.enabled, channel: 'bot', groupNames: input.groupNames, chatIds: targets.map(target => target.chatId!).filter(Boolean), intervalMinutes: Math.max(1, Number(input.intervalMinutes) || 60), message: input.message };
   saveSettings(settings); if (settings.enabled) startSchedule(); else stopSchedule(); return { ok: true, settings };
 });
+// The renderer can't load a raw Windows path as file://C:\..., so hand it the QR as a data URL once the CLI has finished writing it.
+async function readQrDataUrl(path: string): Promise<string | null> {
+  const { statSync } = require('node:fs') as typeof import('node:fs');
+  let lastSize = -1;
+  for (let i = 0; i < 20; i += 1) {
+    try { const size = statSync(path).size; if (size > 0 && size === lastSize) return `data:image/png;base64,${readFileSync(path).toString('base64')}`; lastSize = size; } catch { /* not written yet */ }
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  return null;
+}
 ipcMain.handle('auth-start', async () => {
   const qrcode = join(app.getPath('userData'), 'travelbot-auth.png');
-  if (authProcess && !authProcess.killed) return { ok: true, pending: true, stdout: '授权流程已在等待扫码', stderr: '', qrcode: existsSync(qrcode) ? qrcode : null };
+  if (authProcess && !authProcess.killed) return { ok: true, pending: true, stdout: '授权流程已在等待扫码', stderr: '', qrcode: existsSync(qrcode) ? qrcode : null, qrcodeDataUrl: existsSync(qrcode) ? await readQrDataUrl(qrcode) : null };
   try { if (existsSync(qrcode)) require('node:fs').unlinkSync(qrcode); } catch { /* stale QR can be replaced by the CLI */ }
   const configDir = join(app.getPath('userData'), 'wecom');
   mkdirSync(configDir, { recursive: true });
@@ -183,7 +193,7 @@ ipcMain.handle('auth-start', async () => {
   const deadline = Date.now() + 15000;
   while (!existsSync(qrcode) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 150));
   if (!existsSync(qrcode)) return { ok: false, pending: false, stdout: '', stderr: '企业微信二维码生成失败，请重试', qrcode: null };
-  return { ok: true, pending: true, stdout: '二维码已生成，等待扫码确认', stderr: '', qrcode };
+  return { ok: true, pending: true, stdout: '二维码已生成，等待扫码确认', stderr: '', qrcode, qrcodeDataUrl: await readQrDataUrl(qrcode) };
 });
 ipcMain.handle('send-test', async (_event, content: string, groupIds: string[]) => {
   const sessions = await listSessions();

@@ -15,6 +15,7 @@ function App() {
   const [operationState, setOperationState] = useState<OperationState>('idle');
   const [detail, setDetail] = useState('准备就绪');
   const [qr, setQr] = useState<string | null>(null);
+  const [qrSrc, setQrSrc] = useState<string | null>(null);
   const [message, setMessage] = useState('TravelBot V0.1 连接测试成功 ✅');
   const [groups, setGroups] = useState<Array<{ id?: string; name: string; lastTime?: string }>>([]);
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
@@ -50,9 +51,10 @@ function App() {
   }, [connectionState]);
 
   const authorize = async () => {
-    setConnectionState('authorizing'); setDetail('正在生成二维码，扫码后请在企业微信中确认（最多等待 5 分钟）'); setQr(null);
+    setConnectionState('authorizing'); setDetail('正在生成二维码，扫码后请在企业微信中确认（最多等待 5 分钟）'); setQr(null); setQrSrc(null);
     const result = await window.travelbot.startAuth();
     if (result.qrcode) setQr(result.qrcode);
+    if (result.qrcodeDataUrl) setQrSrc(result.qrcodeDataUrl);
     if (result.ok && result.pending) { setConnectionState('authorizing'); setDetail('二维码已生成，请立即使用企业微信扫码并确认'); }
     else if (result.ok) { setConnectionState('authorized'); setDetail('连接成功！企业微信授权已保存到本机'); }
     else { setConnectionState('error'); setDetail(result.stderr || '授权未完成'); }
@@ -83,7 +85,7 @@ function App() {
     <header><div className="logo">TB</div><div><div className="eyebrow">TRAVELBOT DESKTOP</div><h1>企业微信连接中心</h1></div><span className="version">V0.1 PoC</span></header>
     <section className="hero"><div><div className="eyebrow accent">ONE-CLICK CONNECTION</div><h2>把 TravelBot 接入你的企业微信</h2><p>安装后扫码授权，完成连接，再发送一条真实测试消息。</p></div><div className={`status-dot ${connected ? 'authorized' : connectionState}`}><i />{connected ? '已连接' : connectionState === 'error' ? '需要处理' : '未连接'}</div></section>
     <section className="steps"><Step n="01" title="安装 EXE" done /><Step n="02" title="扫码授权" active={connectionState === 'authorizing'} done={connectionState === 'authorized'} /><Step n="03" title="发送测试消息" active={operationState === 'sending'} done={operationState === 'success'} /></section>
-    <section className="card"><div className="card-title"><span>连接状态</span><button className="refresh-button" onClick={() => void check()} disabled={busy} title="刷新连接状态" aria-label="刷新连接状态"><span>↻</span></button></div><div className="connection"><div className={`icon ${connected ? 'authorized' : connectionState}`}><span>{connected ? '✓' : '↗'}</span></div><div><strong>{connected ? '企业微信已连接' : '等待企业微信授权'}</strong><p>{detail}</p></div></div>{qr && <div className="qr-box"><img src={`file://${qr}`} alt="企业微信授权二维码" /><button className="link" onClick={() => void window.travelbot.openImage(qr)}>在系统中打开二维码</button></div>}<div className="actions"><button className="primary" onClick={() => void authorize()} disabled={busy}>{connected ? '重新扫码授权' : '扫码授权'}</button></div></section>
+    <section className="card"><div className="card-title"><span>连接状态</span><button className="refresh-button" onClick={() => void check()} disabled={busy} title="刷新连接状态" aria-label="刷新连接状态"><span>↻</span></button></div><div className="connection"><div className={`icon ${connected ? 'authorized' : connectionState}`}><span>{connected ? '✓' : '↗'}</span></div><div><strong>{connected ? '企业微信已连接' : '等待企业微信授权'}</strong><p>{detail}</p></div></div>{qr && <div className="qr-box">{qrSrc ? <img src={qrSrc} alt="企业微信授权二维码" /> : <p className="hint">二维码预览加载失败，请点右侧在系统中打开</p>}<button className="link" onClick={() => void window.travelbot.openImage(qr)}>在系统中打开二维码</button></div>}<div className="actions"><button className="primary" onClick={() => void authorize()} disabled={busy}>{connected ? '重新扫码授权' : '扫码授权'}</button></div></section>
     <section className="card test-card"><div className="card-title"><span>发送测试消息</span><button className="refresh-button" onClick={() => void loadGroups()} disabled={busy || groupsLoading} title="刷新群聊列表" aria-label="刷新群聊列表"><span className={groupsLoading ? 'spinning' : ''}>↻</span></button></div><label>目标群聊（可多选）</label>{groups.length ? <div className="group-list">{groups.map(group => <button className={`group-card ${selectedGroupIds.includes(group.id || '') ? 'selected' : ''}`} key={group.id ?? `${group.name}-${group.lastTime ?? ''}`} onClick={() => { const id = group.id || ''; setSelectedGroupIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]); }} disabled={busy}><span className="group-avatar">群</span><span className="group-meta"><strong>{group.name}</strong><small>{group.lastTime ? `最近会话 ${group.lastTime}` : '可发送会话'}</small></span><span className="group-check">{selectedGroupIds.includes(group.id || '') ? '✓' : ''}</span></button>)}</div> : <p className="hint">暂未找到可发送群聊。请先把机器人加入群聊，并在群里给机器人发一条消息。</p>}<label>消息内容</label><textarea value={message} onChange={e => setMessage(e.target.value)} disabled={busy} /><button className="primary" onClick={() => void send()} disabled={busy || !connected || !selectedGroupIds.length}>{operationState === 'sending' ? '发送中…' : '发送测试消息'}</button>{!connected && <p className="hint">请先完成企业微信扫码授权</p>}</section>
     <GroupMessagePanel selectedChatIds={selectedCustomerChatIds} onSelectedChatIdsChange={setSelectedCustomerChatIds} scheduleMessage={scheduleMessage} />
     <ItineraryPanel />
