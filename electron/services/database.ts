@@ -67,6 +67,9 @@ export class TravelDatabase {
     `);
   }
 
+  /** 供运营模块的仓储层复用同一个 SQLite 连接。 */
+  get connection(): DatabaseSync { return this.db; }
+
   close() { this.db.close(); }
 
   searchContent(query: string, kind?: ContentKind): ContentItem[] {

@@ -1,32 +1,18 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ContentInput, ContentKind, DailyPushSettings, GroupMessageConfigInput, ItineraryItem, ItinerarySettings, MessageTemplateInput, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
+import type { DailyPushSettings, GroupMessageConfigInput, ItineraryItem, ItinerarySettings } from '../src/domain/business';
 
+// 运营模块统一走 ops:invoke（界面 → API → Service），方法名白名单在主进程 api/ops-ipc.ts。
+contextBridge.exposeInMainWorld('opsApi', {
+  invoke: (method: string, args?: unknown) => ipcRenderer.invoke('ops:invoke', method, args),
+});
+
+// 设置页（企业微信授权、群发配置）以及行程提醒、每日推送两个任务来源。
 contextBridge.exposeInMainWorld('travelbot', {
   authStatus: () => ipcRenderer.invoke('auth-status'),
-  getSettings: () => ipcRenderer.invoke('get-settings'),
-  saveSchedule: (settings: { enabled: boolean; channel?: 'bot' | 'groupmsg'; groupIds: string[]; groupNames: string[]; customerChatIds?: string[]; intervalMinutes: number; message: string }) => ipcRenderer.invoke('save-schedule', settings),
-  listGroups: () => ipcRenderer.invoke('list-groups'),
   startAuth: () => ipcRenderer.invoke('auth-start'),
-  sendTest: (content: string, groupIds: string[]) => ipcRenderer.invoke('send-test', content, groupIds),
   openImage: (path: string) => ipcRenderer.invoke('open-image', path),
-  weatherPreview: (location: string) => ipcRenderer.invoke('weather-preview', location),
-  contentSearch: (input: { query: string; kind?: ContentKind }) => ipcRenderer.invoke('content-search', input),
-  contentSave: (input: ContentInput & { id?: string }) => ipcRenderer.invoke('content-save', input),
-  contentDelete: (id: string) => ipcRenderer.invoke('content-delete', id),
-  listTemplates: () => ipcRenderer.invoke('template-list'),
-  saveTemplate: (input: MessageTemplateInput) => ipcRenderer.invoke('template-save', input),
-  deleteTemplate: (id: string) => ipcRenderer.invoke('template-delete', id),
-  contentCommand: (text: string) => ipcRenderer.invoke('content-command', text),
-  contentConfirm: (input: { command: NaturalLanguageCommand; confirmed: boolean }) => ipcRenderer.invoke('content-confirm', input),
-  getWeatherJob: () => ipcRenderer.invoke('get-weather-job'),
-  saveWeatherJob: (input: Omit<WeatherJobSettings, 'id' | 'lastSentAt' | 'lastResult'>) => ipcRenderer.invoke('save-weather-job', input),
-  runWeatherJob: () => ipcRenderer.invoke('run-weather-job'),
   groupMessageConfig: () => ipcRenderer.invoke('groupmsg-get-config'),
   saveGroupMessageConfig: (input: GroupMessageConfigInput) => ipcRenderer.invoke('groupmsg-save-config', input),
-  listCustomerGroups: () => ipcRenderer.invoke('groupmsg-list-groups'),
-  sendGroupMessage: (input: { chatIds: string[]; content: string }) => ipcRenderer.invoke('groupmsg-send', input),
-  groupMessageHistory: () => ipcRenderer.invoke('groupmsg-history'),
-  groupMessageResult: (msgid: string) => ipcRenderer.invoke('groupmsg-result', msgid),
   dailyPush: () => ipcRenderer.invoke('daily-get'),
   saveDailyPush: (input: DailyPushSettings) => ipcRenderer.invoke('daily-save', input),
   dailyPushGroups: (ownerUserIds: string[]) => ipcRenderer.invoke('daily-list-groups', ownerUserIds),

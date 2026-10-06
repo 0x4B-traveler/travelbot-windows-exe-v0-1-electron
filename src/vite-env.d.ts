@@ -1,10 +1,33 @@
 /// <reference types="vite/client" />
-import type { ContentInput, ContentItem, ContentKind, CustomerGroup, DailyPushSettings, DailyPushView, GroupMessageConfigInput, ItineraryItem, ItineraryParseResult, ItinerarySettings, ItineraryView, GroupMessageConfigView, GroupMessageRecord, GroupMessageResult, MessageTemplate, MessageTemplateInput, NaturalLanguageCommand, WeatherGreeting, WeatherJobSettings } from './domain/business';
+import type { CustomerGroup, DailyPushSettings, DailyPushView, GroupMessageConfigInput, GroupMessageConfigView, ItineraryItem, ItineraryParseResult, ItinerarySettings, ItineraryView } from './domain/business';
+import type { OpsResponse } from './domain/ops';
 declare global {
-  interface Window { travelbot: { authStatus(): Promise<CliResult>; listGroups(): Promise<{ ok: boolean; groups: Array<{ id?: string; name: string; lastTime?: string }>; stderr?: string }>; getSettings(): Promise<ScheduleSettings>; saveSchedule(settings: ScheduleInput): Promise<{ ok: boolean; stderr?: string; settings?: ScheduleSettings }>; startAuth(): Promise<CliResult & { pending?: boolean; qrcode?: string | null; qrcodeDataUrl?: string | null }>; sendTest(content: string, groupIds: string[]): Promise<CliResult>; openImage(path: string): Promise<boolean>; weatherPreview(location: string): Promise<{ ok: boolean; stderr?: string; greeting?: WeatherGreeting }>; contentSearch(input: { query: string; kind?: ContentKind }): Promise<{ ok: boolean; stderr?: string; items: ContentItem[] }>; contentSave(input: ContentInput & { id?: string }): Promise<{ ok: boolean; stderr?: string; item?: ContentItem }>; contentDelete(id: string): Promise<{ ok: boolean; stderr?: string }>; listTemplates(): Promise<MessageTemplate[]>; saveTemplate(input: MessageTemplateInput): Promise<{ ok: boolean; stderr?: string; template?: MessageTemplate }>; deleteTemplate(id: string): Promise<{ ok: boolean; stderr?: string }>; contentCommand(text: string): Promise<{ ok: boolean; stderr?: string; command?: NaturalLanguageCommand; items?: unknown[]; requiresConfirmation?: boolean }>; contentConfirm(input: { command: NaturalLanguageCommand; confirmed: boolean }): Promise<{ ok: boolean; stderr?: string; item?: unknown }>; getWeatherJob(): Promise<WeatherJobSettings>; saveWeatherJob(input: Omit<WeatherJobSettings, 'id' | 'lastSentAt' | 'lastResult'>): Promise<{ ok: boolean; stderr?: string; job?: WeatherJobSettings }>; runWeatherJob(): Promise<{ ok: boolean; stderr?: string; greeting?: WeatherGreeting }>; groupMessageConfig(): Promise<GroupMessageConfigView>; saveGroupMessageConfig(input: GroupMessageConfigInput): Promise<{ ok: boolean; stderr?: string; config?: GroupMessageConfigView }>; listCustomerGroups(): Promise<{ ok: boolean; stderr?: string; groups: CustomerGroup[] }>; sendGroupMessage(input: { chatIds: string[]; content: string }): Promise<{ ok: boolean; stderr?: string; record?: GroupMessageRecord; failList?: string[] }>; groupMessageHistory(): Promise<GroupMessageRecord[]>; groupMessageResult(msgid: string): Promise<{ ok: boolean; stderr?: string; result?: GroupMessageResult }>; dailyPush(): Promise<DailyPushView>; saveDailyPush(input: DailyPushSettings): Promise<{ ok: boolean; stderr?: string; view?: DailyPushView }>; dailyPushGroups(ownerUserIds: string[]): Promise<{ ok: boolean; stderr?: string; groups: CustomerGroup[] }>; previewDailyPush(input?: DailyPushSettings): Promise<{ ok: boolean; stderr?: string; content?: string }>; runDailyPush(): Promise<{ ok: boolean; message: string; content?: string; errors: string[]; view?: DailyPushView }>; itinerary(): Promise<ItineraryView>; saveItinerarySettings(input: ItinerarySettings): Promise<ItineraryResult>; loadItineraryGroups(ownerUserIds: string[]): Promise<ItineraryResult>; parseItinerary(text: string): Promise<ItineraryParseResult>; importItinerary(input: { text: string; mode: 'append' | 'replace' }): Promise<ItineraryResult & { added?: number; errors?: string[] }>; updateItineraryItem(input: { id: string; patch: Partial<Pick<ItineraryItem, 'separate'>> }): Promise<ItineraryResult>; deleteItineraryItems(input: { ids?: string[]; groupName?: string; beforeToday?: boolean }): Promise<ItineraryResult>; previewItineraryJob(jobId: string): Promise<{ ok: boolean; stderr?: string; content?: string }>; runItineraryJob(jobId: string): Promise<{ ok: boolean; message: string; errors?: string[]; view?: ItineraryView }>; checkItineraryConfirmations(): Promise<ItineraryResult & { confirmed?: number }>; }; }
+  interface Window {
+    opsApi: { invoke(method: string, args?: unknown): Promise<OpsResponse<unknown>> };
+    travelbot: {
+      authStatus(): Promise<CliResult>;
+      startAuth(): Promise<CliResult & { pending?: boolean; qrcode?: string | null; qrcodeDataUrl?: string | null }>;
+      openImage(path: string): Promise<boolean>;
+      groupMessageConfig(): Promise<GroupMessageConfigView>;
+      saveGroupMessageConfig(input: GroupMessageConfigInput): Promise<{ ok: boolean; stderr?: string; config?: GroupMessageConfigView }>;
+      dailyPush(): Promise<DailyPushView>;
+      saveDailyPush(input: DailyPushSettings): Promise<{ ok: boolean; stderr?: string; view?: DailyPushView }>;
+      dailyPushGroups(ownerUserIds: string[]): Promise<{ ok: boolean; stderr?: string; groups: CustomerGroup[] }>;
+      previewDailyPush(input?: DailyPushSettings): Promise<{ ok: boolean; stderr?: string; content?: string }>;
+      runDailyPush(): Promise<{ ok: boolean; message: string; content?: string; errors: string[]; view?: DailyPushView }>;
+      itinerary(): Promise<ItineraryView>;
+      saveItinerarySettings(input: ItinerarySettings): Promise<ItineraryResult>;
+      loadItineraryGroups(ownerUserIds: string[]): Promise<ItineraryResult>;
+      parseItinerary(text: string): Promise<ItineraryParseResult>;
+      importItinerary(input: { text: string; mode: 'append' | 'replace' }): Promise<ItineraryResult & { added?: number; errors?: string[] }>;
+      updateItineraryItem(input: { id: string; patch: Partial<Pick<ItineraryItem, 'separate'>> }): Promise<ItineraryResult>;
+      deleteItineraryItems(input: { ids?: string[]; groupName?: string; beforeToday?: boolean }): Promise<ItineraryResult>;
+      previewItineraryJob(jobId: string): Promise<{ ok: boolean; stderr?: string; content?: string }>;
+      runItineraryJob(jobId: string): Promise<{ ok: boolean; message: string; errors?: string[]; view?: ItineraryView }>;
+      checkItineraryConfirmations(): Promise<ItineraryResult & { confirmed?: number }>;
+    };
+  }
   interface ItineraryResult { ok: boolean; stderr?: string; view?: ItineraryView; }
-  interface ScheduleInput { enabled: boolean; channel?: 'bot' | 'groupmsg'; groupIds: string[]; groupNames: string[]; customerChatIds?: string[]; intervalMinutes: number; message: string; }
-  interface ScheduleSettings extends ScheduleInput { channel: 'bot' | 'groupmsg'; chatIds: string[]; customerChatIds: string[]; lastRun?: string; lastResult?: string; }
   interface CliResult { ok: boolean; stdout?: string; stderr?: string; step?: string; pending?: boolean; }
 }
 export {};
