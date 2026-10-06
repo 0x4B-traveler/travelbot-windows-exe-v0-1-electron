@@ -3,13 +3,14 @@ import { execFile, spawn, ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { ContentKind, DailyPushSettings, GroupMessageConfigInput, GroupMessageRecord, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
+import type { ContentKind, DailyPushSettings, GroupMessageConfigInput, GroupMessageRecord, ItineraryItem, ItinerarySettings, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
 import { TravelDatabase } from './services/database';
 import { GroupMessageStore } from './services/group-message-store';
 import { WeComCustomerGroupApi } from './services/wecom-api';
 import { createWeatherGreeting, formatForecast, OpenMeteoWeatherProvider } from './services/weather';
-import { DailyPushRunner, DailyPushStore, parseSendTime } from './services/daily-push';
+import { DailyPushRunner, DailyPushStore, localDate, parseSendTime } from './services/daily-push';
 import { parseNaturalLanguage } from './services/natural-language';
+import { ItineraryRunner, ItineraryStore, normalizeName, parseItinerary } from './services/itinerary';
 
 const execFileAsync = promisify(execFile);
 let mainWindow: BrowserWindow | null = null;
@@ -26,6 +27,9 @@ let customerGroupApi: WeComCustomerGroupApi | null = null;
 let dailyPushStore: DailyPushStore | null = null;
 let dailyPushRunner: DailyPushRunner | null = null;
 let dailyPushTimer: NodeJS.Timeout | null = null;
+let itineraryStore: ItineraryStore | null = null;
+let itineraryRunner: ItineraryRunner | null = null;
+let itineraryTimer: NodeJS.Timeout | null = null;
 const startHidden = process.argv.includes('--hidden');
 const weatherProvider = new OpenMeteoWeatherProvider();
 // channel：bot = 通过 wecom-cli 智能机器人直接发送；groupmsg = 通过群发助手创建客户群群发任务
@@ -69,6 +73,18 @@ function startDailyPush() {
   const tick = () => { void dailyPushRunner?.tick().catch(() => { /* 结果已写入状态 */ }); };
   dailyPushTimer = setInterval(tick, 60 * 1000);
   tick();
+}
+// 行程定时群发：每分钟检查到点的行程任务，并回查群主确认状态。
+function startItinerary() {
+  if (itineraryTimer) clearInterval(itineraryTimer);
+  const tick = () => { void itineraryRunner?.tick().catch(() => { /* 结果已写入状态 */ }); };
+  itineraryTimer = setInterval(tick, 60 * 1000);
+  tick();
+}
+function defaultOwners(owners: string[]) {
+  const cleaned = [...new Set(owners.map(id => id.trim()).filter(Boolean))];
+  const sender = groupMessageStore?.senderUserId();
+  return cleaned.length ? cleaned : (sender ? [sender] : []);
 }
 function applyLaunchAtLogin(enabled: boolean) {
   if (process.platform !== 'win32' || !app.isPackaged) return;
@@ -131,6 +147,7 @@ async function runCli(args: string[], options: { timeout?: number } = {}) {
 
 function createWindow() {
   mainWindow = new BrowserWindow({ show: !startHidden, width: 1120, height: 760, minWidth: 860, minHeight: 620, backgroundColor: '#08111f', webPreferences: { preload: join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
+  mainWindow.removeMenu();
   mainWindow.on('close', (event) => { if (!quitting) { event.preventDefault(); mainWindow?.hide(); } });
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) void mainWindow.loadURL(devUrl); else void mainWindow.loadFile(join(app.getAppPath(), 'dist', 'index.html'));
@@ -220,6 +237,59 @@ ipcMain.handle('daily-list-groups', async (_event, ownerUserIds: string[]) => {
 });
 ipcMain.handle('daily-preview', async (_event, input?: DailyPushSettings) => dailyPushRunner?.preview(input) ?? { ok: false, stderr: '每日推送模块尚未初始化' });
 ipcMain.handle('daily-run', async () => dailyPushRunner ? { ...(await dailyPushRunner.run()), view: dailyPushStore?.view() } : { ok: false, created: [], errors: [], message: '每日推送模块尚未初始化' });
+ipcMain.handle('itinerary-get', async () => itineraryStore?.view());
+ipcMain.handle('itinerary-save-settings', async (_event, input: ItinerarySettings) => {
+  if (!itineraryStore) return { ok: false, stderr: '行程模块尚未初始化' };
+  if (!parseSendTime(input.digestTime)) return { ok: false, stderr: '每日行程创建时间格式应为 HH:mm，例如 20:00' };
+  const lead = Number(input.reminderLeadMinutes);
+  if (!Number.isFinite(lead) || lead < 0 || lead > 24 * 60) return { ok: false, stderr: '单独提醒提前时间应在 0 到 1440 分钟之间' };
+  if (input.enabled && !input.dryRun && !groupMessageStore?.credentials()) return { ok: false, stderr: '请先在“客户群群发”中配置企业 ID 和 Secret，或先开启干跑模式' };
+  const current = itineraryStore.settings();
+  // 客户群列表只由“加载客户群”更新，避免界面旧数据覆盖
+  itineraryStore.saveSettings({ ...current, enabled: input.enabled, dryRun: input.dryRun, digestTime: input.digestTime.trim(), reminderLeadMinutes: Math.round(lead), includeWeather: input.includeWeather, footer: input.footer, ownerUserIds: defaultOwners(input.ownerUserIds) });
+  return { ok: true, view: itineraryStore.view() };
+});
+ipcMain.handle('itinerary-load-groups', async (_event, ownerUserIds: string[]) => {
+  if (!itineraryStore || !customerGroupApi) return { ok: false, stderr: '行程模块尚未初始化' };
+  const owners = defaultOwners(ownerUserIds);
+  if (!owners.length) return { ok: false, stderr: '请先填写至少一个群主 userid' };
+  try {
+    const groups = await customerGroupApi.listCustomerGroups(owners);
+    itineraryStore.saveSettings({ ...itineraryStore.settings(), ownerUserIds: owners, groups, groupsLoadedAt: new Date().toISOString() });
+    return { ok: true, view: itineraryStore.view() };
+  } catch (error: any) { return { ok: false, stderr: error?.message || '客户群列表加载失败' }; }
+});
+ipcMain.handle('itinerary-parse', async (_event, text: string) => parseItinerary(text));
+ipcMain.handle('itinerary-import', async (_event, input: { text: string; mode: 'append' | 'replace' }) => {
+  if (!itineraryStore) return { ok: false, stderr: '行程模块尚未初始化' };
+  const parsed = parseItinerary(input.text);
+  if (!parsed.items.length) return { ok: false, stderr: parsed.errors.join('\n') || '没有可导入的行程', errors: parsed.errors };
+  itineraryStore.saveItems(input.mode === 'replace' ? parsed.items : [...itineraryStore.items(), ...parsed.items]);
+  return { ok: true, added: parsed.items.length, errors: parsed.errors, view: itineraryStore.view() };
+});
+ipcMain.handle('itinerary-update-item', async (_event, input: { id: string; patch: Partial<Pick<ItineraryItem, 'separate'>> }) => {
+  if (!itineraryStore) return { ok: false, stderr: '行程模块尚未初始化' };
+  itineraryStore.saveItems(itineraryStore.items().map(item => item.id === input.id ? { ...item, separate: Boolean(input.patch.separate) } : item));
+  return { ok: true, view: itineraryStore.view() };
+});
+ipcMain.handle('itinerary-delete-items', async (_event, input: { ids?: string[]; groupName?: string; beforeToday?: boolean }) => {
+  if (!itineraryStore) return { ok: false, stderr: '行程模块尚未初始化' };
+  const todayText = localDate(new Date());
+  const remove = (item: ItineraryItem) => Boolean(input.ids?.includes(item.id) || (input.groupName && normalizeName(item.groupName) === normalizeName(input.groupName)) || (input.beforeToday && item.date < todayText));
+  itineraryStore.saveItems(itineraryStore.items().filter(item => !remove(item)));
+  return { ok: true, view: itineraryStore.view() };
+});
+ipcMain.handle('itinerary-preview-job', async (_event, jobId: string) => itineraryRunner?.preview(jobId) ?? { ok: false, stderr: '行程模块尚未初始化' });
+ipcMain.handle('itinerary-run-job', async (_event, jobId: string) => {
+  if (!itineraryRunner || !itineraryStore) return { ok: false, message: '行程模块尚未初始化' };
+  if (!itineraryStore.settings().dryRun && !groupMessageStore?.credentials()) return { ok: false, message: '请先在“客户群群发”中配置企业 ID 和 Secret，或开启干跑模式' };
+  return { ...(await itineraryRunner.runJob(jobId)), view: itineraryStore.view() };
+});
+ipcMain.handle('itinerary-check-confirmations', async () => {
+  if (!itineraryRunner || !itineraryStore) return { ok: false, stderr: '行程模块尚未初始化' };
+  try { const confirmed = await itineraryRunner.checkConfirmations(new Date(), true); return { ok: true, confirmed, view: itineraryStore.view() }; }
+  catch (error: any) { return { ok: false, stderr: error?.message || '查询确认状态失败' }; }
+});
 ipcMain.handle('open-image', async (_event, path: string) => { await shell.openPath(path); return true; });
 ipcMain.handle('weather-preview', async (_event, location: string) => {
   try {
@@ -262,6 +332,6 @@ ipcMain.handle('content-confirm', async (_event, input: { command: NaturalLangua
   return { ok: false, stderr: '该命令不需要确认或暂不支持' };
 });
 
-app.whenReady().then(() => { travelDatabase = new TravelDatabase(join(app.getPath('userData'), 'travelbot.sqlite')); groupMessageStore = new GroupMessageStore(app.getPath('userData')); const store = groupMessageStore; customerGroupApi = new WeComCustomerGroupApi(() => store.credentials()); const api = customerGroupApi; const database = travelDatabase; dailyPushStore = new DailyPushStore(app.getPath('userData')); dailyPushRunner = new DailyPushRunner(dailyPushStore, { getForecast: (location, offset) => weatherProvider.getDailyForecast(location, offset), formatForecast, listRecommendations: () => database.listContentForRotation(), createGroupMessage: input => api.createGroupMessage(input), addHistory: record => store.addHistory(record) }); createWindow(); tray = new Tray(nativeImage.createEmpty()); tray.setToolTip('TravelBot'); tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开 TravelBot', click: () => { mainWindow?.show(); mainWindow?.focus(); } }, { label: '退出', click: () => { quitting = true; app.quit(); } }])); tray.on('click', () => { mainWindow?.show(); mainWindow?.focus(); }); startSchedule(); startWeatherSchedule(); startDailyPush(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); }); });
-app.on('before-quit', () => { if (dailyPushTimer) clearInterval(dailyPushTimer); stopWeatherSchedule(); travelDatabase?.close(); });
+app.whenReady().then(() => { travelDatabase = new TravelDatabase(join(app.getPath('userData'), 'travelbot.sqlite')); groupMessageStore = new GroupMessageStore(app.getPath('userData')); const store = groupMessageStore; customerGroupApi = new WeComCustomerGroupApi(() => store.credentials()); const api = customerGroupApi; const database = travelDatabase; dailyPushStore = new DailyPushStore(app.getPath('userData')); dailyPushRunner = new DailyPushRunner(dailyPushStore, { getForecast: (location, offset) => weatherProvider.getDailyForecast(location, offset), formatForecast, listRecommendations: () => database.listContentForRotation(), createGroupMessage: input => api.createGroupMessage(input), addHistory: record => store.addHistory(record) }); itineraryStore = new ItineraryStore(app.getPath('userData')); itineraryRunner = new ItineraryRunner(itineraryStore, { getForecast: (location, date) => weatherProvider.getForecastForDate(location, date), formatForecast, listCustomerGroups: owners => api.listCustomerGroups(owners), createGroupMessage: input => api.createGroupMessage(input), getGroupMessageResult: msgid => api.getGroupMessageResult(msgid), addHistory: record => store.addHistory(record) }); createWindow(); tray = new Tray(nativeImage.createEmpty()); tray.setToolTip('TravelBot'); tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开 TravelBot', click: () => { mainWindow?.show(); mainWindow?.focus(); } }, { label: '退出', click: () => { quitting = true; app.quit(); } }])); tray.on('click', () => { mainWindow?.show(); mainWindow?.focus(); }); startSchedule(); startWeatherSchedule(); startDailyPush(); startItinerary(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); }); });
+app.on('before-quit', () => { if (dailyPushTimer) clearInterval(dailyPushTimer); if (itineraryTimer) clearInterval(itineraryTimer); stopWeatherSchedule(); travelDatabase?.close(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !tray) app.quit(); });

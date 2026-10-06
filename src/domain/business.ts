@@ -134,3 +134,81 @@ export type DailyPushState = {
 };
 
 export type DailyPushView = DailyPushSettings & { state: DailyPushState; nextRunAt?: string };
+
+/** 旅游团行程：每行一个行程节点，按群名对应到客户群。 */
+export type ItineraryItem = {
+  id: string;
+  /** 客户群名称，需与企业微信里的群名完全一致 */
+  groupName: string;
+  /** 本地日期 YYYY-MM-DD */
+  date: string;
+  /** 本地时间 HH:mm，可为空（全天事项） */
+  time: string;
+  place: string;
+  activity: string;
+  /** 天气城市，留空时用地点查询天气 */
+  city: string;
+  /** 是否在该节点前单独发送一条提醒（否则只出现在前一晚的每日行程里） */
+  separate: boolean;
+};
+
+export type ItineraryParseResult = { items: ItineraryItem[]; errors: string[] };
+
+export type ItinerarySettings = {
+  enabled: boolean;
+  /** 干跑模式：到点只生成内容、记录结果，不调用企业微信接口 */
+  dryRun: boolean;
+  /** 每日行程在出行前一天的创建时间 HH:mm */
+  digestTime: string;
+  /** 单独提醒提前多少分钟创建（给群主留出确认时间） */
+  reminderLeadMinutes: number;
+  includeWeather: boolean;
+  footer: string;
+  ownerUserIds: string[];
+  /** 最近一次加载的客户群列表，用于按群名匹配 */
+  groups: CustomerGroup[];
+  groupsLoadedAt?: string;
+};
+
+export type ItineraryJobKind = 'digest' | 'reminder';
+
+export type ItineraryJobRecord = {
+  status: 'created' | 'dry-run' | 'failed';
+  attempts: number;
+  lastAttemptAt?: string;
+  createdAt?: string;
+  msgid?: string;
+  owner?: string;
+  chatId?: string;
+  content?: string;
+  error?: string;
+  /** 群主是否已在企业微信中确认发送 */
+  confirmed?: boolean;
+  confirmCheckedAt?: string;
+};
+
+export type ItineraryJobStatus = 'scheduled' | 'due' | 'created' | 'confirmed' | 'unconfirmed' | 'dry-run' | 'failed' | 'expired' | 'unmatched';
+
+export type ItineraryJobView = {
+  id: string;
+  kind: ItineraryJobKind;
+  groupName: string;
+  date: string;
+  dueAt: string;
+  expiresAt: string;
+  summary: string;
+  status: ItineraryJobStatus;
+  matchError?: string;
+  record?: ItineraryJobRecord;
+};
+
+export type ItineraryQuota = { groupName: string; month: string; count: number; limit: number };
+
+export type ItineraryView = {
+  settings: ItinerarySettings;
+  items: ItineraryItem[];
+  jobs: ItineraryJobView[];
+  quota: ItineraryQuota[];
+  warnings: string[];
+  lastResult?: string;
+};
