@@ -147,6 +147,7 @@ async function runCli(args: string[], options: { timeout?: number } = {}) {
 
 function createWindow() {
   mainWindow = new BrowserWindow({ show: !startHidden, width: 1120, height: 760, minWidth: 860, minHeight: 620, backgroundColor: '#08111f', webPreferences: { preload: join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
+  mainWindow.removeMenu();
   mainWindow.on('close', (event) => { if (!quitting) { event.preventDefault(); mainWindow?.hide(); } });
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) void mainWindow.loadURL(devUrl); else void mainWindow.loadFile(join(app.getAppPath(), 'dist', 'index.html'));
