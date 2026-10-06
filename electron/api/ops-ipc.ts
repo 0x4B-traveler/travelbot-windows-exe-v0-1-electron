@@ -40,6 +40,7 @@ export function registerOpsApi(services: OpsServices) {
     'task.runNow': ({ id }) => tasks.runNow(id),
     'task.delete': ({ id }) => tasks.delete(id),
     'task.runs': ({ id }) => tasks.runs(id),
+    'task.dryRun': input => tasks.dryRun(input),
 
     'group.list': () => groups.list(),
     'group.refresh': () => groups.refresh(),

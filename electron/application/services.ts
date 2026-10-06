@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   CONTENT_CHANNELS, CONTENT_STATUS_LABELS, MATERIAL_KIND_LABELS,
-  type ContentChannel, type ContentInput, type ContentPiece, type ContentStatus, type ContentVersion, type Dashboard, type DashboardTask,
+  type ContentChannel, type ContentInput, type ContentPiece, type DryRunGroup, type DryRunReport, type ContentStatus, type ContentVersion, type Dashboard, type DashboardTask,
   type GenerateInput, type GroupMatchMode, type ImportResult, type LogEntry, type LogQuery, type Material, type MaterialFacets,
   type MaterialInput, type MaterialKind, type MaterialQuery, type OpsGroup, type OpsTask, type RefreshResult, type Route, type RouteInput,
   type RouteQuery, type TaskInput, type TaskRepeat, type TaskRun, type TaskStatus,
@@ -281,6 +281,37 @@ export type SendResult = { ok: boolean; detail: string };
 export class DistributionService {
   constructor(private readonly bot: BotGateway, private readonly customer: CustomerGroupGateway, private readonly logs: LogService, private readonly onSent: (groupId: string) => void) {}
 
+  /** 预演：做发送前的全部检查，客户群还会用只读接口确认凭证、可信 IP 和群是否还在，但不创建群发任务。 */
+  async dryRun(groups: OpsGroup[], context: { taskId?: string }): Promise<DryRunGroup[]> {
+    const results: DryRunGroup[] = [];
+    let botChats: Set<string> | null | Error = null;
+    const customerChats = new Map<string, Set<string> | Error>();
+    for (const group of groups) {
+      const result = (ok: boolean, detail: string) => {
+        results.push({ name: group.name, channel: group.channel, ok, detail });
+        this.logs.write({ module: 'WeCom', action: '预演', status: ok ? 'info' : 'fail', taskId: context.taskId, groupName: group.name, message: `【预演，未发送】${detail}` });
+      };
+      if (!group.enabled) { result(false, '群已停用，正式执行时会跳过'); continue; }
+      if (!group.available) { result(false, '找不到群（最近一次刷新时已不在列表中），请到群管理刷新'); continue; }
+      if (group.channel === 'bot') {
+        if (botChats === null) botChats = await this.bot.listGroups().then(list => new Set(list.map(item => item.chatId)), error => (error instanceof Error ? error : new Error(String(error))));
+        if (botChats instanceof Error) result(false, `机器人会话列表加载失败：${botChats.message}`);
+        else if (!botChats.has(group.chatId)) result(false, '机器人当前的会话列表里没有这个群');
+        else result(true, '机器人在群里，正式执行时会直接发出');
+        continue;
+      }
+      if (!this.customer.configured()) { result(false, '还没有配置客户群群发（设置 → 客户群群发）'); continue; }
+      const sender = group.owner || this.customer.defaultSender();
+      if (!sender) { result(false, '缺少群主 userid'); continue; }
+      if (!customerChats.has(sender)) customerChats.set(sender, await this.customer.listGroups([sender]).then(list => new Set(list.map(item => item.chatId)), error => (error instanceof Error ? error : new Error(String(error)))));
+      const chats = customerChats.get(sender)!;
+      if (chats instanceof Error) result(false, `企业微信接口校验失败：${chats.message}`);
+      else if (!chats.has(group.chatId)) result(false, `群主 ${sender} 名下找不到这个客户群`);
+      else result(true, `接口和群都正常，正式执行时会创建群发任务，由群主 ${sender} 在企业微信确认后发出`);
+    }
+    return results;
+  }
+
   async send(group: OpsGroup, text: string, context: { taskId?: string; attempt?: number; action?: string }): Promise<SendResult> {
     const base = { module: 'WeCom' as const, taskId: context.taskId, groupName: group.name, attempt: context.attempt };
     const action = context.action ?? '发送文本';
@@ -383,6 +414,28 @@ export class TaskService {
     return this.view(updated);
   }
 
+  async dryRun(input: { id: string } | TaskInput): Promise<DryRunReport> {
+    const draft: Pick<StoredTask, 'contentId' | 'groupIds' | 'weatherCity'> & { id?: string } = 'id' in input && input.id
+      ? this.get(input.id)
+      : { contentId: (input as TaskInput).contentId, groupIds: cleanList((input as TaskInput).groupIds ?? []), weatherCity: String((input as TaskInput).weatherCity ?? '').trim() };
+    if (!draft.groupIds.length) fail('请至少选择一个群');
+    const content = this.contents.assertSendable(draft.contentId);
+    const text = await this.compose(content.body, draft.weatherCity, new Date(), draft.id);
+    const groups = this.groups.getMany(draft.groupIds);
+    const missing = draft.groupIds.length - groups.length;
+    const results = await this.distribution.dryRun(groups, { taskId: draft.id });
+    for (let index = 0; index < missing; index += 1) results.push({ name: '（已删除的群）', channel: 'bot', ok: false, detail: '群已被删除' });
+    const ok = results.every(item => item.ok);
+    this.logs.write({ module: 'Task', action: '预演', status: ok ? 'ok' : 'fail', taskId: draft.id, message: `【预演，未发送】“${content.title}”：${results.filter(item => item.ok).length}/${results.length} 个群检查通过` });
+    return { contentTitle: content.title, text, groups: results, ok, checkedAt: nowIso() };
+  }
+
+  private async compose(body: string, weatherCity: string, now: Date, taskId?: string): Promise<string> {
+    if (!weatherCity) return body;
+    try { return `${body}\n\n${await this.weather.forecastLine(weatherCity, now)}`; }
+    catch (error: any) { this.logs.write({ module: 'Task', action: '获取天气', status: 'fail', taskId, message: `${weatherCity}天气获取失败，本次不附天气：${error?.message || error}` }); return body; }
+  }
+
   async runNow(id: string): Promise<OpsTask> {
     const task = this.get(id);
     if (task.status !== 'pending') fail('只有待执行的任务可以立即执行');
@@ -422,11 +475,7 @@ export class TaskService {
     let text = '';
     try {
       const content = this.contents.assertSendable(task.contentId);
-      text = content.body;
-      if (task.weatherCity) {
-        try { text = `${text}\n\n${await this.weather.forecastLine(task.weatherCity, now)}`; }
-        catch (error: any) { this.logs.write({ module: 'Task', action: '获取天气', status: 'fail', taskId: task.id, message: `${task.weatherCity}天气获取失败，本次不附天气：${error?.message || error}` }); }
-      }
+      text = await this.compose(content.body, task.weatherCity, now, task.id);
     } catch (error: any) {
       return this.finish(task, startedAt, attempt, [], [error?.message || String(error)], task.groupIds);
     }

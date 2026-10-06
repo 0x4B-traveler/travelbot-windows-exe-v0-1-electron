@@ -101,6 +101,9 @@ export type OpsTask = {
 };
 
 export type TaskInput = { contentId: string; groupIds: string[]; runAt: string; repeat: TaskRepeat; weatherCity: string };
+/** 预演：走完整个发送流程（取内容、拼天气、逐群检查、校验企业微信接口），但不真正发出。 */
+export type DryRunGroup = { name: string; channel: GroupChannel; ok: boolean; detail: string };
+export type DryRunReport = { contentTitle: string; text: string; groups: DryRunGroup[]; ok: boolean; checkedAt: string };
 export type TaskRun = { id: string; taskId: string; startedAt: string; status: 'success' | 'failed' | 'skipped'; detail: string };
 
 // ───────── 群管理 ─────────
@@ -195,6 +198,8 @@ export interface OpsApi {
   'task.runNow'(input: { id: string }): Promise<OpsTask>;
   'task.delete'(input: { id: string }): Promise<void>;
   'task.runs'(input: { id: string }): Promise<TaskRun[]>;
+  /** 传 id 预演已有任务；传 TaskInput 预演还没创建的任务。都不会真正发出，也不改变任务状态。 */
+  'task.dryRun'(input: { id: string } | TaskInput): Promise<DryRunReport>;
 
   'group.list'(): Promise<OpsGroup[]>;
   'group.refresh'(): Promise<RefreshResult>;

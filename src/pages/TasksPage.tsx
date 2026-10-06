@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { call, formatTime, toLocalInput } from '../api';
-import { GROUP_CHANNEL_LABELS, TASK_REPEAT_LABELS, TASK_STATUS_LABELS, type OpsTask, type TaskRepeat, type TaskStatus } from '../domain/ops';
+import { GROUP_CHANNEL_LABELS, TASK_REPEAT_LABELS, TASK_STATUS_LABELS, type DryRunReport, type OpsTask, type TaskInput, type TaskRepeat, type TaskStatus } from '../domain/ops';
 import { ItineraryPanel } from '../ItineraryPanel';
 import { DailyPushPanel } from '../DailyPushPanel';
 import { Card, Empty, Field, Modal, Notice, Pill, Tabs, useAction, useLoad } from '../ui';
@@ -25,6 +25,7 @@ function TaskList({ presetContentId, onPresetUsed }: { presetContentId?: string;
   const [tasks, error, reload] = useLoad(() => call('task.list', {}), []);
   const [creating, setCreating] = useState(Boolean(presetContentId));
   const [runsOf, setRunsOf] = useState<OpsTask | null>(null);
+  const [report, setReport] = useState<DryRunReport | null>(null);
   const { busy, notice, run } = useAction();
   const list = (tasks ?? []).filter(task => filter === 'all' || task.status === filter);
   const count = (status: TaskStatus) => (tasks ?? []).filter(task => task.status === status).length;
@@ -47,6 +48,7 @@ function TaskList({ presetContentId, onPresetUsed }: { presetContentId?: string;
             {task.status === 'pending' && <button className="link" disabled={busy} onClick={() => void run(async () => { const result = await call('task.runNow', { id: task.id }); await reload(); if (result.status === 'failed' || result.lastResult?.startsWith('失败')) throw new Error(`执行失败：${result.lastResult ?? ''}，详情见运行日志`); return `执行完成：${result.lastResult ?? ''}`; })}>立即执行</button>}
             {task.status === 'failed' && <button className="link" disabled={busy} onClick={() => act(() => call('task.retry', { id: task.id }), '已开始重试')}>重试</button>}
             {(task.status === 'pending' || task.status === 'failed') && <button className="link" disabled={busy} onClick={() => act(() => call('task.cancel', { id: task.id }), '任务已取消')}>取消</button>}
+            {task.status !== 'running' && <button className="link" disabled={busy} title="走一遍发送流程，但不真正发出" onClick={() => void run(async () => { setReport(await call('task.dryRun', { id: task.id })); })}>预演</button>}
             <button className="link" onClick={() => setRunsOf(task)}>记录</button>
             {task.status !== 'running' && <button className="link danger-text" disabled={busy} onClick={() => { if (window.confirm('确定删除这个任务吗？')) act(() => call('task.delete', { id: task.id }), '任务已删除'); }}>删除</button>}
           </td>
@@ -55,6 +57,7 @@ function TaskList({ presetContentId, onPresetUsed }: { presetContentId?: string;
     </Card>
     {creating && <TaskForm presetContentId={presetContentId} onClose={() => { setCreating(false); onPresetUsed(); }} onCreated={async () => { setCreating(false); onPresetUsed(); await reload(); }} />}
     {runsOf && <RunsDialog task={runsOf} onClose={() => setRunsOf(null)} />}
+    {report && <DryRunDialog report={report} onClose={() => setReport(null)} />}
   </>;
 }
 
@@ -66,7 +69,9 @@ function TaskForm({ presetContentId, onClose, onCreated }: { presetContentId?: s
   const [runAt, setRunAt] = useState(() => toLocalInput(new Date(Date.now() + 10 * 60 * 1000)));
   const [repeat, setRepeat] = useState<TaskRepeat>('once');
   const [weatherCity, setWeatherCity] = useState('');
+  const [report, setReport] = useState<DryRunReport | null>(null);
   const { busy, notice, run } = useAction();
+  const input = (): TaskInput => ({ contentId, groupIds, runAt: new Date(runAt).toISOString(), repeat, weatherCity });
   const usable = (groups ?? []).filter(group => group.enabled && group.available);
   const preview = contents?.find(piece => piece.id === contentId);
   const toggle = (id: string) => setGroupIds(current => (current.includes(id) ? current.filter(item => item !== id) : [...current, id]));
@@ -95,8 +100,10 @@ function TaskForm({ presetContentId, onClose, onCreated }: { presetContentId?: s
     </Field>
     <Notice notice={notice} />
     <div className="inline-actions end"><button className="secondary" onClick={onClose}>取消</button>
-      <button className="primary" disabled={busy || !contentId || !groupIds.length || !runAt} onClick={() => void run(async () => { await call('task.create', { contentId, groupIds, runAt: new Date(runAt).toISOString(), repeat, weatherCity }); await onCreated(); })}>创建任务</button>
+      <button className="secondary" disabled={busy || !contentId || !groupIds.length} title="走一遍发送流程，但不真正发出" onClick={() => void run(async () => { setReport(await call('task.dryRun', input())); })}>预演</button>
+      <button className="primary" disabled={busy || !contentId || !groupIds.length || !runAt} onClick={() => void run(async () => { await call('task.create', input()); await onCreated(); })}>创建任务</button>
     </div>
+    {report && <DryRunDialog report={report} onClose={() => setReport(null)} />}
   </Modal>;
 }
 
@@ -108,5 +115,19 @@ function RunsDialog({ task, onClose }: { task: OpsTask; onClose: () => void }) {
       <td><Pill tone={item.status === 'success' ? 'ok' : 'fail'}>{item.status === 'success' ? '成功' : item.status === 'skipped' ? '已错过' : '失败'}</Pill></td>
       <td className="pre">{item.detail}</td>
     </tr>)}</tbody></table> : <Empty>还没有执行过。</Empty>}
+  </Modal>;
+}
+
+function DryRunDialog({ report, onClose }: { report: DryRunReport; onClose: () => void }) {
+  const passed = report.groups.filter(group => group.ok).length;
+  return <Modal title={`预演：${report.contentTitle}`} onClose={onClose} wide>
+    <p className={`notice ${report.ok ? 'ok' : 'error'}`}>{report.ok ? `全部 ${report.groups.length} 个群检查通过。` : `${report.groups.length} 个群中 ${passed} 个检查通过，其余正式执行时会失败。`}这次是预演，没有发出任何消息，也没有在企业微信创建群发任务。</p>
+    <table className="ops-table compact"><thead><tr><th>群</th><th>类型</th><th>结果</th></tr></thead>
+      <tbody>{report.groups.map((group, index) => <tr key={index}>
+        <td><strong>{group.name}</strong></td><td>{GROUP_CHANNEL_LABELS[group.channel]}</td>
+        <td><Pill tone={group.ok ? 'ok' : 'fail'}>{group.ok ? '通过' : '不通过'}</Pill><small>{group.detail}</small></td>
+      </tr>)}</tbody>
+    </table>
+    <Field label="将要发送的完整内容"><div className="preview-box"><p className="pre">{report.text}</p></div></Field>
   </Modal>;
 }
