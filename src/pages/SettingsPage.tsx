@@ -55,12 +55,12 @@ function GroupMessageConfigCard() {
   const { busy, notice, run } = useAction();
   useEffect(() => { void window.travelbot.groupMessageConfig().then(view => { setConfig(view); setCorpId(view.corpId); setSenderUserId(view.senderUserId); }); }, []);
   return <Card title="客户群群发">
-    <p className="hint">用于向客户群发送：通过企业微信“客户群群发”接口创建任务，群主在企业微信里确认后发出。运行本程序的电脑公网 IP 需加入应用的“企业可信 IP”。</p>
+    <p className="hint">用于向客户群发送：通过企业微信“客户群群发”接口创建任务，群主在企业微信里确认后发出。运行本程序的电脑公网 IP 需加入该自建应用的“企业可信 IP”。</p>
     <div className="form-grid">
       <Field label="企业 ID（corpid）"><input value={corpId} onChange={event => setCorpId(event.target.value)} /></Field>
       <Field label="发送人 userid（群主）"><input value={senderUserId} onChange={event => setSenderUserId(event.target.value)} /></Field>
     </div>
-    <Field label="客户联系 Secret"><input type="password" value={secret} placeholder={config?.hasSecret ? '已保存，留空则不修改' : '在管理后台“客户联系”中获取'} onChange={event => setSecret(event.target.value)} autoComplete="off" /></Field>
+    <Field label="自建应用 Secret" hint="应用管理 → 自建应用 → Secret；并在“客户联系 → 可调用接口的应用”里勾选这个应用"><input type="password" value={secret} placeholder={config?.hasSecret ? '已保存，留空则不修改' : '在管理后台“应用管理 → 自建应用”中获取'} onChange={event => setSecret(event.target.value)} autoComplete="off" /></Field>
     {config && !config.encryptionAvailable && <p className="notice error">当前系统不支持加密存储，无法保存 Secret。</p>}
     <Notice notice={notice} />
     <div className="actions"><button className="primary" disabled={busy || !corpId.trim() || !senderUserId.trim() || (!secret.trim() && !config?.hasSecret)} onClick={() => void run(async () => {
