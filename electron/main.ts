@@ -3,7 +3,7 @@ import { execFile, spawn, ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { ContentKind, DailyPushSettings, GroupMessageConfigInput, GroupMessageRecord, ItineraryItem, ItinerarySettings, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
+import type { ContentInput, ContentKind, DailyPushSettings, GroupMessageConfigInput, GroupMessageRecord, ItineraryItem, ItinerarySettings, MessageTemplateInput, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
 import { TravelDatabase } from './services/database';
 import { GroupMessageStore } from './services/group-message-store';
 import { WeComCustomerGroupApi } from './services/wecom-api';
@@ -321,6 +321,27 @@ ipcMain.handle('content-search', async (_event, input: { query: string; kind?: C
   if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化', items: [] };
   return { ok: true, items: travelDatabase.searchContent(input.query, input.kind) };
 });
+ipcMain.handle('content-save', async (_event, input: ContentInput & { id?: string }) => {
+  if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化' };
+  if (!input.title?.trim()) return { ok: false, stderr: '请填写标题' };
+  const fields = { kind: input.kind, title: input.title.trim(), body: (input.body ?? '').trim(), location: input.location?.trim() || undefined, tags: (input.tags ?? []).map(tag => tag.trim()).filter(Boolean) };
+  const item = input.id ? travelDatabase.updateContent(input.id, fields) : travelDatabase.createContent(fields);
+  return item ? { ok: true, item } : { ok: false, stderr: '素材不存在或已被删除' };
+});
+ipcMain.handle('content-delete', async (_event, id: string) => {
+  if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化' };
+  return travelDatabase.deleteContent(id) ? { ok: true } : { ok: false, stderr: '素材不存在或已被删除' };
+});
+ipcMain.handle('template-list', async () => travelDatabase?.listTemplates() ?? []);
+ipcMain.handle('template-save', async (_event, input: MessageTemplateInput) => {
+  if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化' };
+  if (!input.name?.trim() || !input.body?.trim()) return { ok: false, stderr: '模板名称和内容不能为空' };
+  return { ok: true, template: travelDatabase.saveTemplate(input) };
+});
+ipcMain.handle('template-delete', async (_event, id: string) => {
+  if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化' };
+  return travelDatabase.deleteTemplate(id) ? { ok: true } : { ok: false, stderr: '模板不存在或已被删除' };
+});
 ipcMain.handle('content-command', async (_event, text: string) => {
   if (!travelDatabase) return { ok: false, stderr: '本地数据库尚未初始化' };
   const command = parseNaturalLanguage(text);
@@ -342,6 +363,6 @@ ipcMain.handle('content-confirm', async (_event, input: { command: NaturalLangua
   return { ok: false, stderr: '该命令不需要确认或暂不支持' };
 });
 
-app.whenReady().then(() => { travelDatabase = new TravelDatabase(join(app.getPath('userData'), 'travelbot.sqlite')); groupMessageStore = new GroupMessageStore(app.getPath('userData')); const store = groupMessageStore; customerGroupApi = new WeComCustomerGroupApi(() => store.credentials()); const api = customerGroupApi; const database = travelDatabase; dailyPushStore = new DailyPushStore(app.getPath('userData')); dailyPushRunner = new DailyPushRunner(dailyPushStore, { getForecast: (location, offset) => weatherProvider.getDailyForecast(location, offset), formatForecast, listRecommendations: () => database.listContentForRotation(), createGroupMessage: input => api.createGroupMessage(input), addHistory: record => store.addHistory(record) }); itineraryStore = new ItineraryStore(app.getPath('userData')); itineraryRunner = new ItineraryRunner(itineraryStore, { getForecast: (location, date) => weatherProvider.getForecastForDate(location, date), formatForecast, listCustomerGroups: owners => api.listCustomerGroups(owners), createGroupMessage: input => api.createGroupMessage(input), getGroupMessageResult: msgid => api.getGroupMessageResult(msgid), addHistory: record => store.addHistory(record) }); createWindow(); tray = new Tray(nativeImage.createEmpty()); tray.setToolTip('TravelBot'); tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开 TravelBot', click: () => { mainWindow?.show(); mainWindow?.focus(); } }, { label: '退出', click: () => { quitting = true; app.quit(); } }])); tray.on('click', () => { mainWindow?.show(); mainWindow?.focus(); }); startSchedule(); startWeatherSchedule(); startDailyPush(); startItinerary(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); }); });
+app.whenReady().then(() => { travelDatabase = new TravelDatabase(join(app.getPath('userData'), 'travelbot.sqlite')); groupMessageStore = new GroupMessageStore(app.getPath('userData')); const store = groupMessageStore; customerGroupApi = new WeComCustomerGroupApi(() => store.credentials()); const api = customerGroupApi; const database = travelDatabase; dailyPushStore = new DailyPushStore(app.getPath('userData')); dailyPushRunner = new DailyPushRunner(dailyPushStore, { getForecast: (location, offset) => weatherProvider.getDailyForecast(location, offset), formatForecast, listRecommendations: () => database.listContentForRotation(), createGroupMessage: input => api.createGroupMessage(input), addHistory: record => store.addHistory(record) }); itineraryStore = new ItineraryStore(app.getPath('userData')); itineraryRunner = new ItineraryRunner(itineraryStore, { getForecast: (location, date) => weatherProvider.getForecastForDate(location, date), formatForecast, listCustomerGroups: owners => api.listCustomerGroups(owners), createGroupMessage: input => api.createGroupMessage(input), getGroupMessageResult: msgid => api.getGroupMessageResult(msgid), addHistory: record => store.addHistory(record) }); createWindow(); tray = new Tray(nativeImage.createEmpty()); tray.setToolTip('旅游运营助手'); tray.setContextMenu(Menu.buildFromTemplate([{ label: '打开旅游运营助手', click: () => { mainWindow?.show(); mainWindow?.focus(); } }, { label: '退出', click: () => { quitting = true; app.quit(); } }])); tray.on('click', () => { mainWindow?.show(); mainWindow?.focus(); }); startSchedule(); startWeatherSchedule(); startDailyPush(); startItinerary(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); }); });
 app.on('before-quit', () => { if (dailyPushTimer) clearInterval(dailyPushTimer); if (itineraryTimer) clearInterval(itineraryTimer); stopWeatherSchedule(); travelDatabase?.close(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !tray) app.quit(); });

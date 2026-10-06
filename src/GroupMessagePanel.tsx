@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { ContentItem, CustomerGroup, GroupMessageConfigView, GroupMessageRecord, GroupMessageResult } from './domain/business';
+import type { ContentItem, CustomerGroup, GroupMessageConfigView, GroupMessageRecord, GroupMessageResult, MessageTemplate } from './domain/business';
 
 type Props = {
   selectedChatIds: string[];
@@ -19,6 +19,7 @@ export function GroupMessagePanel({ selectedChatIds, onSelectedChatIdsChange, sc
   const [groups, setGroups] = useState<CustomerGroup[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [presets, setPresets] = useState<ContentItem[]>([]);
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [content, setContent] = useState('');
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState('');
@@ -31,6 +32,7 @@ export function GroupMessagePanel({ selectedChatIds, onSelectedChatIdsChange, sc
     void window.travelbot.groupMessageConfig().then(view => { setConfig(view); setCorpId(view.corpId); setSenderUserId(view.senderUserId); });
     void window.travelbot.groupMessageHistory().then(setHistory);
     void window.travelbot.contentSearch({ query: '' }).then(result => setPresets(result.items ?? []));
+    void window.travelbot.listTemplates().then(setTemplates);
   }, []);
   useEffect(() => { if (configured) void loadGroups(); }, [configured]);
 
@@ -52,6 +54,7 @@ export function GroupMessagePanel({ selectedChatIds, onSelectedChatIdsChange, sc
   const toggleGroup = (chatId: string) => onSelectedChatIdsChange(selectedChatIds.includes(chatId) ? selectedChatIds.filter(id => id !== chatId) : [...selectedChatIds, chatId]);
   const applyPreset = (value: string) => {
     if (value === '__schedule') setContent(scheduleMessage);
+    else if (value.startsWith('tpl:')) { const template = templates.find(item => item.id === value.slice(4)); if (template) setContent(template.body); }
     else { const item = presets.find(preset => preset.id === value); if (item) setContent(`${item.title}\n${item.body}`.trim()); }
   };
   const send = async () => {
@@ -91,7 +94,8 @@ export function GroupMessagePanel({ selectedChatIds, onSelectedChatIdsChange, sc
     <select defaultValue="" onChange={e => { applyPreset(e.target.value); e.target.value = ''; }}>
       <option value="" disabled>选择预设内容填入…</option>
       <option value="__schedule">后台定时消息模板</option>
-      {presets.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
+      {templates.length > 0 && <optgroup label="消息模板">{templates.map(item => <option key={item.id} value={`tpl:${item.id}`}>{item.category ? `[${item.category}] ` : ''}{item.name}</option>)}</optgroup>}
+      {presets.length > 0 && <optgroup label="素材库">{presets.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</optgroup>}
     </select>
     <label>群发内容</label>
     <textarea value={content} onChange={e => setContent(e.target.value)} disabled={sending} />

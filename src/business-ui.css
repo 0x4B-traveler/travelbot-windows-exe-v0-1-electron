@@ -28,3 +28,62 @@
 .job-status.expired,.job-status.scheduled{color:#7f98ad}
 .warn-box{border-color:rgba(255,122,122,.45);background:rgba(91,31,31,.22)}
 .danger-text{color:#ff9a9a !important}
+
+/* 左侧菜单布局 */
+.layout{display:flex;min-height:100vh}
+.sidebar{position:sticky;top:0;height:100vh;width:220px;flex:none;display:flex;flex-direction:column;gap:18px;padding:22px 14px;background:#0a1626;border-right:1px solid #1d3149}
+.brand{display:flex;align-items:center;gap:11px;padding:0 6px 6px}
+.brand .logo{width:40px;height:40px;font-size:18px}
+.brand strong{display:block;font-size:15px;letter-spacing:-.3px;margin-bottom:3px}
+.sidebar nav{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+.nav-section{font:500 10px 'DM Mono',monospace;letter-spacing:1.5px;color:#5d7591;padding:0 10px 6px}
+.nav-item{display:flex;align-items:center;gap:10px;width:100%;background:none;border:0;border-radius:9px;color:#a9bbd0;font:600 13px Manrope;padding:10px;cursor:pointer;text-align:left}
+.nav-item:hover{background:#11243a;color:#e8eef7}
+.nav-item.active{background:#123039;color:#6de0d5;box-shadow:inset 3px 0 0 #53d7ca}
+.nav-icon{width:20px;text-align:center;font-size:14px}
+.sidebar-status{display:flex;align-items:center;gap:8px;background:#0d1b2c;border:1px solid #1e334d;border-radius:9px;color:#91a6bf;font:11px 'DM Mono';padding:10px;cursor:pointer}
+.sidebar-status i{width:8px;height:8px;border-radius:99px;background:#637891}
+.sidebar-status.authorized i{background:#4fd1c5;box-shadow:0 0 10px #4fd1c5}
+.sidebar-status.error i{background:#f09a6a}
+.content{flex:1;min-width:0;padding:30px 36px 10px;max-width:1060px}
+.page-head{display:flex;align-items:end;justify-content:space-between;padding-bottom:22px;margin-bottom:22px;border-bottom:1px solid #1d3149}
+.page-head h1{font-size:26px;letter-spacing:-1px;margin:8px 0 6px}
+.content .steps{padding:0 0 20px}
+
+/* 工作台 */
+.stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:18px}
+.stat-card{display:flex;flex-direction:column;gap:6px;text-align:left;background:#0d1b2c;border:1px solid #1e334d;border-radius:14px;padding:18px;color:#e8eef7;cursor:pointer}
+.stat-card:hover{border-color:#53d7ca}
+.stat-card b{font-size:30px;letter-spacing:-1px}
+.stat-card small{color:#7188a5;font-size:11px}
+.quick-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.quick-card{display:flex;align-items:center;gap:12px;text-align:left;background:#0a1727;border:1px solid #243a54;border-radius:11px;color:#dce7f5;padding:13px;cursor:pointer}
+.quick-card:hover{border-color:#53d7ca;background:#123039}
+.quick-card strong{display:block;font-size:13px;margin-bottom:3px}
+.quick-card small{color:#7188a5;font-size:11px}
+.quick-icon{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:9px;background:#183a49;font-size:16px}
+
+/* 素材库 / 消息模板 */
+.chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.chip{background:#0a1727;border:1px solid #243a54;border-radius:999px;color:#a9bbd0;font:600 12px Manrope;padding:6px 13px;cursor:pointer}
+.chip:hover{border-color:#53d7ca}
+.chip.active{background:#123039;border-color:#53d7ca;color:#6de0d5}
+.schedule-card select{width:100%;background:#08121f;border:1px solid #263c55;border-radius:8px;color:#e8eef7;padding:11px;font:13px Manrope;margin-bottom:14px;outline:none}
+.schedule-card label{display:block;color:#91a6bf;font-size:11px;margin-bottom:8px}
+.schedule-card textarea{width:100%;resize:vertical;background:#08121f;border:1px solid #263c55;border-radius:8px;color:#e8eef7;padding:12px;font:13px Manrope;margin-bottom:14px;outline:none}
+.schedule-card textarea.tall{min-height:120px}
+.schedule-card textarea:focus,.schedule-card select:focus{border-color:#53d7ca}
+.editor-box{margin:6px 0 16px;padding:16px;border:1px solid rgba(80,213,201,.35);border-radius:12px;background:rgba(31,76,91,.18)}
+.editor-box>strong{display:block;margin-bottom:12px;font-size:13px}
+.inline-actions.end{justify-content:flex-end}
+.inline-actions.end .primary{margin-left:0}
+.item-list{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.item-card{background:#0a1727;border:1px solid #243a54;border-radius:11px;padding:13px 15px}
+.item-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.item-head strong{font-size:13px}
+.kind-badge{flex:none;background:#183a49;color:#66dfd1;border-radius:6px;padding:2px 8px;font:600 11px Manrope}
+.item-body{white-space:pre-line;font-size:12px;line-height:1.7;color:#b4c8d8;max-height:110px;overflow:hidden}
+.item-foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+.item-foot .row-actions .link{margin-left:10px}
+.empty-box{display:flex;align-items:center;gap:14px}
+.empty-box .hint{margin:0}

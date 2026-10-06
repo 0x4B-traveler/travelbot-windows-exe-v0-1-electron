@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { ContentItem, ContentKind, WeatherJobSettings } from '../../src/domain/business';
+import type { ContentInput, ContentItem, ContentKind, MessageTemplate, MessageTemplateInput, WeatherJobSettings } from '../../src/domain/business';
 
 type ContentRow = {
   id: string;
@@ -14,6 +14,7 @@ type ContentRow = {
   created_at: string;
   updated_at: string;
 };
+type TemplateRow = { id: string; name: string; category: string; body: string; created_at: string; updated_at: string };
 type WeatherJobRow = { id: string; location: string; chat_ids: string; interval_minutes: number; enabled: number; last_sent_at: string | null; last_result: string | null };
 
 export class TravelDatabase {
@@ -54,6 +55,15 @@ export class TravelDatabase {
         last_sent_at TEXT,
         last_result TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS message_templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
     `);
   }
 
@@ -70,18 +80,18 @@ export class TravelDatabase {
     return rows.map(toContentItem);
   }
 
-  createContent(input: { kind: ContentKind; title: string; body: string; location?: string; tags?: string[] }): ContentItem {
+  createContent(input: ContentInput): ContentItem {
     const now = new Date().toISOString();
     const item: ContentItem = { id: randomUUID(), kind: input.kind, title: input.title.trim(), body: input.body.trim(), location: input.location, tags: input.tags ?? [], createdAt: now, updatedAt: now };
     this.db.prepare('INSERT INTO content_items (id, kind, title, body, location, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(item.id, item.kind, item.title, item.body, item.location ?? null, JSON.stringify(item.tags), item.createdAt, item.updatedAt);
     return item;
   }
 
-  updateContent(id: string, patch: Partial<Pick<ContentItem, 'title' | 'body' | 'location' | 'tags'>>): ContentItem | null {
+  updateContent(id: string, patch: Partial<Pick<ContentItem, 'kind' | 'title' | 'body' | 'location' | 'tags'>>): ContentItem | null {
     const current = this.getContent(id);
     if (!current) return null;
     const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
-    this.db.prepare('UPDATE content_items SET title = ?, body = ?, location = ?, tags = ?, updated_at = ? WHERE id = ?').run(next.title, next.body, next.location ?? null, JSON.stringify(next.tags), next.updatedAt, id);
+    this.db.prepare('UPDATE content_items SET kind = ?, title = ?, body = ?, location = ?, tags = ?, updated_at = ? WHERE id = ?').run(next.kind, next.title, next.body, next.location ?? null, JSON.stringify(next.tags), next.updatedAt, id);
     return next;
   }
 
@@ -98,6 +108,24 @@ export class TravelDatabase {
   listContentForRotation(): ContentItem[] {
     const rows = this.db.prepare('SELECT * FROM content_items ORDER BY created_at ASC, id ASC').all() as unknown as ContentRow[];
     return rows.map(toContentItem);
+  }
+
+  listTemplates(): MessageTemplate[] {
+    const rows = this.db.prepare('SELECT * FROM message_templates ORDER BY category ASC, updated_at DESC').all() as unknown as TemplateRow[];
+    return rows.map(row => ({ id: row.id, name: row.name, category: row.category, body: row.body, createdAt: row.created_at, updatedAt: row.updated_at }));
+  }
+
+  saveTemplate(input: MessageTemplateInput): MessageTemplate {
+    const now = new Date().toISOString();
+    const existing = input.id ? this.listTemplates().find(item => item.id === input.id) : undefined;
+    const template: MessageTemplate = { id: existing?.id ?? randomUUID(), name: input.name.trim(), category: input.category.trim(), body: input.body.trim(), createdAt: existing?.createdAt ?? now, updatedAt: now };
+    this.db.prepare(`INSERT INTO message_templates (id, name, category, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name, category=excluded.category, body=excluded.body, updated_at=excluded.updated_at`).run(template.id, template.name, template.category, template.body, template.createdAt, template.updatedAt);
+    return template;
+  }
+
+  deleteTemplate(id: string): boolean {
+    return this.db.prepare('DELETE FROM message_templates WHERE id = ?').run(id).changes > 0;
   }
 
   getWeatherJob(): WeatherJobSettings {

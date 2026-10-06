@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ContentKind, DailyPushSettings, GroupMessageConfigInput, ItineraryItem, ItinerarySettings, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
+import type { ContentInput, ContentKind, DailyPushSettings, GroupMessageConfigInput, ItineraryItem, ItinerarySettings, MessageTemplateInput, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
 
 contextBridge.exposeInMainWorld('travelbot', {
   authStatus: () => ipcRenderer.invoke('auth-status'),
@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld('travelbot', {
   openImage: (path: string) => ipcRenderer.invoke('open-image', path),
   weatherPreview: (location: string) => ipcRenderer.invoke('weather-preview', location),
   contentSearch: (input: { query: string; kind?: ContentKind }) => ipcRenderer.invoke('content-search', input),
+  contentSave: (input: ContentInput & { id?: string }) => ipcRenderer.invoke('content-save', input),
+  contentDelete: (id: string) => ipcRenderer.invoke('content-delete', id),
+  listTemplates: () => ipcRenderer.invoke('template-list'),
+  saveTemplate: (input: MessageTemplateInput) => ipcRenderer.invoke('template-save', input),
+  deleteTemplate: (id: string) => ipcRenderer.invoke('template-delete', id),
   contentCommand: (text: string) => ipcRenderer.invoke('content-command', text),
   contentConfirm: (input: { command: NaturalLanguageCommand; confirmed: boolean }) => ipcRenderer.invoke('content-confirm', input),
   getWeatherJob: () => ipcRenderer.invoke('get-weather-job'),

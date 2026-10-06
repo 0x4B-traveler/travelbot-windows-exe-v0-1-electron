@@ -11,6 +11,22 @@ export type ContentItem = {
   updatedAt: string;
 };
 
+export const CONTENT_KIND_LABELS: Record<ContentKind, string> = { guide: '攻略', route: '线路', spot: '景点', restaurant: '餐厅', hotel: '酒店' };
+
+export type ContentInput = { kind: ContentKind; title: string; body: string; location?: string; tags?: string[] };
+
+/** 消息模板：在群发、定时任务里复用的固定文案。 */
+export type MessageTemplate = {
+  id: string;
+  name: string;
+  category: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MessageTemplateInput = { id?: string; name: string; category: string; body: string };
+
 export type WeatherSnapshot = {
   location: string;
   latitude: number;
