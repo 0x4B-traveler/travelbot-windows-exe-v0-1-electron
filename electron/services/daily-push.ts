@@ -81,7 +81,7 @@ export function groupTargetsByOwner(targets: DailyPushTarget[], skipOwners: stri
 
 function byteLength(text: string) { return Buffer.byteLength(text, 'utf8'); }
 
-function truncateToBytes(text: string, maxBytes: number): string {
+export function truncateToBytes(text: string, maxBytes: number): string {
   if (byteLength(text) <= maxBytes) return text;
   let result = '';
   for (const char of text) { if (byteLength(result + char + '…') > maxBytes) break; result += char; }

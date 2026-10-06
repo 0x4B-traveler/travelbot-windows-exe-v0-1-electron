@@ -12,3 +12,19 @@
 .groupmsg-card input[type=password]:focus,.groupmsg-card select:focus{border-color:#53d7ca}
 .groupmsg-card .preview-box{margin-bottom:10px}
 .channel-row{display:flex;gap:18px;margin-bottom:14px}
+
+.itinerary-card .itinerary-paste{min-height:120px;font:12px/1.6 Consolas,monospace}
+.itinerary-card .sub-title{margin-top:18px}
+.itinerary-card .table-wrap{overflow-x:auto;margin-bottom:10px}
+.itinerary-table{width:100%;border-collapse:collapse;font-size:12px;color:#c3d7e4}
+.itinerary-table th,.itinerary-table td{padding:7px 8px;border-bottom:1px solid #1d3347;text-align:left;vertical-align:top}
+.itinerary-table th{color:#7f98ad;font-weight:700}
+.itinerary-table .row-actions{white-space:nowrap}
+.itinerary-table .row-actions .link{margin-right:8px}
+.job-status{white-space:nowrap;font-weight:700}
+.job-status.confirmed{color:#53d7ca}
+.job-status.created,.job-status.due,.job-status.dry-run{color:#e6c35c}
+.job-status.unconfirmed,.job-status.failed,.job-status.unmatched{color:#ff7a7a}
+.job-status.expired,.job-status.scheduled{color:#7f98ad}
+.warn-box{border-color:rgba(255,122,122,.45);background:rgba(91,31,31,.22)}
+.danger-text{color:#ff9a9a !important}

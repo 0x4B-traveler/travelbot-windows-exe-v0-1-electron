@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ContentKind, DailyPushSettings, GroupMessageConfigInput, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
+import type { ContentKind, DailyPushSettings, GroupMessageConfigInput, ItineraryItem, ItinerarySettings, NaturalLanguageCommand, WeatherJobSettings } from '../src/domain/business';
 
 contextBridge.exposeInMainWorld('travelbot', {
   authStatus: () => ipcRenderer.invoke('auth-status'),
@@ -27,4 +27,14 @@ contextBridge.exposeInMainWorld('travelbot', {
   dailyPushGroups: (ownerUserIds: string[]) => ipcRenderer.invoke('daily-list-groups', ownerUserIds),
   previewDailyPush: (input?: DailyPushSettings) => ipcRenderer.invoke('daily-preview', input),
   runDailyPush: () => ipcRenderer.invoke('daily-run'),
+  itinerary: () => ipcRenderer.invoke('itinerary-get'),
+  saveItinerarySettings: (input: ItinerarySettings) => ipcRenderer.invoke('itinerary-save-settings', input),
+  loadItineraryGroups: (ownerUserIds: string[]) => ipcRenderer.invoke('itinerary-load-groups', ownerUserIds),
+  parseItinerary: (text: string) => ipcRenderer.invoke('itinerary-parse', text),
+  importItinerary: (input: { text: string; mode: 'append' | 'replace' }) => ipcRenderer.invoke('itinerary-import', input),
+  updateItineraryItem: (input: { id: string; patch: Partial<Pick<ItineraryItem, 'separate'>> }) => ipcRenderer.invoke('itinerary-update-item', input),
+  deleteItineraryItems: (input: { ids?: string[]; groupName?: string; beforeToday?: boolean }) => ipcRenderer.invoke('itinerary-delete-items', input),
+  previewItineraryJob: (jobId: string) => ipcRenderer.invoke('itinerary-preview-job', jobId),
+  runItineraryJob: (jobId: string) => ipcRenderer.invoke('itinerary-run-job', jobId),
+  checkItineraryConfirmations: () => ipcRenderer.invoke('itinerary-check-confirmations'),
 });

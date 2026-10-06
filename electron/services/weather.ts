@@ -58,6 +58,32 @@ export class OpenMeteoWeatherProvider implements WeatherProvider {
     };
   }
 
+  /** 指定日期（YYYY-MM-DD，目标地点当地日期）的逐日预报，最多支持未来 16 天。 */
+  async getForecastForDate(location: string, date: string): Promise<WeatherForecast> {
+    const place = await this.geocode(location);
+    const url = new URL('https://api.open-meteo.com/v1/forecast');
+    url.searchParams.set('latitude', String(place.latitude));
+    url.searchParams.set('longitude', String(place.longitude));
+    url.searchParams.set('daily', 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max');
+    url.searchParams.set('start_date', date);
+    url.searchParams.set('end_date', date);
+    url.searchParams.set('timezone', 'auto');
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`天气服务暂时不可用（HTTP ${response.status}）`);
+    const payload = await response.json() as { daily?: Record<string, Array<number | string | null>> };
+    const daily = payload.daily;
+    if (!daily?.time?.[0]) throw new Error('天气服务未返回逐日预报');
+    const probability = daily.precipitation_probability_max?.[0];
+    return {
+      location: place.name,
+      date: String(daily.time[0]),
+      weatherCode: Number(daily.weather_code?.[0]),
+      maxC: Number(daily.temperature_2m_max?.[0]),
+      minC: Number(daily.temperature_2m_min?.[0]),
+      precipitationProbability: probability === null || probability === undefined ? undefined : Number(probability),
+    };
+  }
+
   private async geocode(location: string): Promise<GeocodeResult> {
     const url = new URL('https://geocoding-api.open-meteo.com/v1/search');
     url.searchParams.set('name', location.trim());
