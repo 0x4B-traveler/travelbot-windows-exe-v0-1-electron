@@ -161,6 +161,8 @@ export type RpaSettings = {
   stepDelayMs: number;
   /** 客户端没运行时用来启动它的 exe 路径，可留空。 */
   clientPath: string;
+  /** 打开聊天后用 Windows 自带 OCR 识别聊天标题，和群名对不上就不发。 */
+  verifyChat: boolean;
   guard: RpaGuard;
 };
 /** 防封：按真人的节奏、频率和时段发送，出问题自动停手。 */
@@ -218,7 +220,7 @@ export type AccountStatus = { ok: boolean; detail: string; client?: string; sent
 
 export type SendSettings = { mode: SendMode; rpa: RpaSettings; pool: PoolSettings };
 export const DEFAULT_RPA_GUARD: RpaGuard = { groupGapMinSec: 20, groupGapMaxSec: 60, activeStart: '07:30', activeEnd: '21:30', maxPerHour: 20, maxPerDay: 80, maxPerGroupPerDay: 3, pauseAfterFailures: 3, pauseMinutes: 30, varyOpening: false, maxImages: 3 };
-export const DEFAULT_SEND_SETTINGS: SendSettings = { mode: 'api', rpa: { client: 'wecom', autoSend: true, sendKey: 'enter', searchHotkey: '^f', stepDelayMs: 800, clientPath: '', guard: DEFAULT_RPA_GUARD }, pool: DEFAULT_POOL_SETTINGS };
+export const DEFAULT_SEND_SETTINGS: SendSettings = { mode: 'api', rpa: { client: 'wecom', autoSend: true, sendKey: 'enter', searchHotkey: '^f', stepDelayMs: 800, clientPath: '', verifyChat: true, guard: DEFAULT_RPA_GUARD }, pool: DEFAULT_POOL_SETTINGS };
 /** 客户群在当前发送方式下的发送能力。 */
 export function groupCapabilities(channel: GroupChannel, mode: SendMode): GroupCapabilities {
   return channel === 'customer' && mode === 'rpa' ? { text: true, image: true, needsConfirm: false } : GROUP_CAPABILITIES[channel];

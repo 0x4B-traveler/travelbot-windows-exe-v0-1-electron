@@ -9,6 +9,7 @@ import type { DesktopRpaGateway } from '../application/ports';
 // Ctrl+F 搜索群名 → 回车进入群聊 → 粘贴内容 → 按发送键 → 逐张粘贴图片发送。全程通过剪贴板输入，结束后恢复剪贴板。
 // 每一步按键前都会确认前台窗口仍是客户端，被切走就立即停止，避免把内容打到别的窗口里。
 // 防封：每一步等待都带随机抖动，图片之间随机停几秒，节奏接近真人操作。
+// 防发错群：进群后截取窗口顶部的聊天标题，用 Windows 自带的 OCR 识别，和群名对不上就停下、不粘贴内容。
 
 type ClientProfile = { processes: string[]; windows: Array<{ cls: string; title?: string }> };
 const CLIENT_PROFILES: Record<RpaClient, ClientProfile> = {
@@ -17,7 +18,7 @@ const CLIENT_PROFILES: Record<RpaClient, ClientProfile> = {
   wechat: { processes: ['Weixin', 'WeChat'], windows: [{ cls: 'WeChatMainWndForPC' }, { cls: 'mmui::MainWindow', title: '微信' }, { cls: 'Qt51514QWindowIcon', title: '微信' }] },
 };
 
-type Job = ClientProfile & { action: 'check' | 'send'; clientPath: string; searchHotkey: string; sendKeys: string; autoSend: boolean; delayMs: number; target?: string; text?: string; images?: string[] };
+type Job = ClientProfile & { action: 'check' | 'send'; clientPath: string; searchHotkey: string; sendKeys: string; autoSend: boolean; delayMs: number; verifyChat: boolean; workDir: string; target?: string; text?: string; images?: string[] };
 type ScriptResult = { ok: boolean; code: string; message: string };
 
 export class PowerShellRpaGateway implements DesktopRpaGateway {
@@ -29,7 +30,9 @@ export class PowerShellRpaGateway implements DesktopRpaGateway {
   async check(override?: RpaSettings): Promise<string> {
     const settings = override ?? this.settings();
     const result = await this.enqueue(() => this.run(settings, { action: 'check' }));
-    return `已找到${RPA_CLIENT_LABELS[settings.client]}主窗口（${result.message}），可以使用 RPA 发送`;
+    const [exe, ocr] = result.message.split('|');
+    if (settings.verifyChat && !ocr) throw new Error('本机没有可用的中文 OCR，无法在发送前核对群名。请在 Windows“设置 → 时间和语言 → 语言”里给中文安装“光学字符识别”，或在 RPA 设置里关闭“发送前核对群名”');
+    return `已找到${RPA_CLIENT_LABELS[settings.client]}主窗口（${exe}）${settings.verifyChat ? `，发送前会用 OCR（${ocr}）核对群名` : ''}，可以使用 RPA 发送`;
   }
 
   async sendText(target: string, text: string, images: string[] = []): Promise<{ sent: boolean }> {
@@ -59,6 +62,8 @@ export class PowerShellRpaGateway implements DesktopRpaGateway {
       searchHotkey: settings.searchHotkey.trim() || '^f',
       sendKeys: settings.sendKey === 'ctrlEnter' ? '^{ENTER}' : '{ENTER}',
       autoSend: settings.autoSend,
+      verifyChat: settings.verifyChat,
+      workDir: this.workDir,
       delayMs: Math.min(5000, Math.max(200, Math.round(settings.stepDelayMs) || 800)),
     };
     writeFileSync(jobPath, JSON.stringify(job), 'utf8');
@@ -87,6 +92,8 @@ function describe(code: string, message: string, label: string): string {
   switch (code) {
     case 'NOT_RUNNING': return `没有找到正在运行的${label}，请先打开并登录${label}（也可以在设置里填写客户端路径，让程序自动启动）`;
     case 'NO_WINDOW': return `${label}已运行，但找不到主窗口，请确认已登录`;
+    case 'WRONG_CHAT': return `进群后核对群名没通过（识别到的标题：${message || '无'}），可能搜到了别的群或群名有变化，已停止，内容没有粘贴。截图在 RPA 目录的 chat-title.png`;
+    case 'OCR_UNAVAILABLE': return '本机没有可用的中文 OCR，无法核对群名，已停止。可以在 RPA 设置里关闭“发送前核对群名”';
     case 'FOCUS_LOST': return `无法把${label}切到前台，或操作途中前台被切走（电脑锁屏、有弹窗或有人在操作），已停止，本次没有确认发出`;
     default: return `RPA 操作${label}失败：${message || code}`;
   }
@@ -116,8 +123,111 @@ public static class RpaWin {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT rect);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 }
 "@
+# Physical pixels for screenshots, so the OCR boxes match the screen
+[RpaWin]::SetProcessDPIAware() | Out-Null
+
+# ---------- Chat title check with the built-in Windows OCR (no network, no AI) ----------
+$script:ocrEngine = $null
+$script:asTask = $null
+function Get-OcrEngine {
+  if ($script:ocrEngine) { return $script:ocrEngine }
+  try {
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
+    $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
+    $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
+    $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType = WindowsRuntime]
+    $null = [Windows.Globalization.Language, Windows.Globalization, ContentType = WindowsRuntime]
+    $script:asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -like 'IAsyncOperation*' } | Select-Object -First 1
+    $lang = New-Object Windows.Globalization.Language('zh-Hans-CN')
+    if ([Windows.Media.Ocr.OcrEngine]::IsLanguageSupported($lang)) { $script:ocrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($lang) }
+  } catch { $script:ocrEngine = $null }
+  return $script:ocrEngine
+}
+
+function Await-Op($op, [Type]$type) {
+  $task = $script:asTask.MakeGenericMethod($type).Invoke($null, @($op))
+  $task.Wait(-1) | Out-Null
+  return $task.Result
+}
+
+# Keep letters and digits only: drops spaces, punctuation, emoji and member counts' brackets
+function Normalize-Name($text) { return ([string]$text -replace '[^\p{L}\p{N}]', '') }
+
+function Get-Lcs($a, $b) {
+  $prev = New-Object int[] ($b.Length + 1)
+  for ($i = 1; $i -le $a.Length; $i++) {
+    $cur = New-Object int[] ($b.Length + 1)
+    for ($j = 1; $j -le $b.Length; $j++) {
+      if ($a[$i - 1] -eq $b[$j - 1]) { $cur[$j] = $prev[$j - 1] + 1 } else { $cur[$j] = [Math]::Max($prev[$j], $cur[$j - 1]) }
+    }
+    $prev = $cur
+  }
+  return $prev[$b.Length]
+}
+
+function Test-TitleMatch($target, $line) {
+  $t = Normalize-Name $target
+  $l = Normalize-Name $line
+  if (-not $t -or -not $l) { return $false }
+  if ($l.Contains($t)) { return $true }
+  # Long names are cut off with an ellipsis in the title bar
+  if ($l.Length -ge 4 -and $t.StartsWith($l)) { return $true }
+  # Tolerate an OCR slip of one or two characters
+  return ((Get-Lcs $t $l) / $t.Length) -ge 0.8
+}
+
+# Text lines in the chat title bar: the top strip of the window, right of the session list
+function Read-ChatTitle($h, $workDir) {
+  $engine = Get-OcrEngine
+  if (-not $engine) { throw 'OCR_UNAVAILABLE' }
+  $rect = New-Object RpaWin+RECT
+  [RpaWin]::GetWindowRect($h, [ref]$rect) | Out-Null
+  $scale = 1.0
+  try { $dpi = [RpaWin]::GetDpiForWindow($h); if ($dpi -gt 0) { $scale = $dpi / 96.0 } } catch { }
+  $width = $rect.Right - $rect.Left
+  $strip = [int](72 * $scale)
+  $shot = New-Object System.Drawing.Bitmap($width, $strip)
+  $g = [System.Drawing.Graphics]::FromImage($shot)
+  $g.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $shot.Size)
+  $g.Dispose()
+  # Enlarge small title text for the OCR, within its size limit
+  $zoom = [Math]::Min(2.0, ([Windows.Media.Ocr.OcrEngine]::MaxImageDimension - 1) / [double]$width)
+  $big = New-Object System.Drawing.Bitmap($shot, [int]($width * $zoom), [int]($strip * $zoom))
+  $shot.Dispose()
+  $path = Join-Path $workDir 'chat-title.png'
+  $big.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+  $big.Dispose()
+  $file = Await-Op ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])
+  $stream = Await-Op ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+  try {
+    $decoder = Await-Op ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+    $bitmap = Await-Op ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+    $result = Await-Op ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+  } finally { $stream.Dispose() }
+  # The search box and session list sit in the left column (under ~280 logical px); the chat title starts right of it
+  $minX = 280 * $scale * $zoom
+  $lines = @()
+  foreach ($line in $result.Lines) {
+    $words = @($line.Words)
+    if (-not $words.Count) { continue }
+    $left = ($words | ForEach-Object { $_.BoundingRect.X } | Measure-Object -Minimum).Minimum
+    if ($left -lt $minX) { continue }
+    $lines += (($words | ForEach-Object { $_.Text }) -join '')
+  }
+  return $lines
+}
+
+function Assert-ChatTitle($h, $target, $workDir) {
+  $lines = @(Read-ChatTitle $h $workDir)
+  foreach ($line in $lines) { if (Test-TitleMatch $target $line) { return } }
+  throw ('WRONG_CHAT|' + ($lines -join ' / '))
+}
 
 function Find-ClientWindow($job) {
   foreach ($w in $job.windows) {
@@ -205,7 +315,11 @@ try {
   }
   if ($job.action -eq 'check') {
     $proc = Get-Process -Id (Get-WindowPid $h) -ErrorAction SilentlyContinue
-    Out-Result $true 'FOUND' ($(if ($proc) { "$($proc.ProcessName).exe" } else { 'window' }))
+    $exe = 'window'
+    if ($proc) { $exe = "$($proc.ProcessName).exe" }
+    $ocr = ''
+    if ($job.verifyChat -and (Get-OcrEngine)) { $ocr = $script:ocrEngine.RecognizerLanguage.LanguageTag }
+    Out-Result $true 'FOUND' ($exe + '|' + $ocr)
     exit 0
   }
 
@@ -222,6 +336,8 @@ try {
     Wait-Step 1.5
     Send-Keys $h '{ENTER}'
     Wait-Step 1
+    # Make sure the opened chat is the target group before typing anything into it
+    if ($job.verifyChat) { Assert-ChatTitle $h ([string]$job.target) ([string]$job.workDir) }
     Paste-Text $h $job.text
     # Like a person glancing over the text before sending
     Wait-Step 1.5
@@ -246,7 +362,7 @@ try {
   Out-Result $true 'SENT' ''
 } catch {
   $message = $_.Exception.Message
-  if ($message -match '^[A-Z_]+$') { Out-Result $false $message '' } else { Out-Result $false 'ERROR' $message }
+  if ($message -match '^([A-Z_]+)(\|(.*))?$') { Out-Result $false $Matches[1] $Matches[3] } else { Out-Result $false 'ERROR' $message }
 }
 exit 0
 `;

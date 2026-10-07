@@ -316,6 +316,7 @@ function normalizeRpa(input?: Partial<RpaSettings>): RpaSettings {
     searchHotkey: String(input?.searchHotkey ?? '').trim() || base.searchHotkey,
     stepDelayMs: Number.isFinite(delay) ? Math.min(5000, Math.max(200, Math.round(delay))) : base.stepDelayMs,
     clientPath: String(input?.clientPath ?? '').trim(),
+    verifyChat: input?.verifyChat ?? base.verifyChat,
     guard: normalizeGuard(input?.guard),
   };
 }
