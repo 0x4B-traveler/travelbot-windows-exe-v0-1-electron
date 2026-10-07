@@ -28,6 +28,9 @@ export type MaterialInput = { id?: string; kind: MaterialKind; title: string; bo
 export type MaterialFacets = { cities: string[]; tags: string[] };
 export type ImportResult = { added: number; errors: string[] };
 /** 导入示例数据的结果；weatherCities 是每条路线建议在运营任务里填的天气城市。 */
+/** 用示例路线给一批群排一周测试任务：群按路线数分组，每天轮换，一周内每个群都会收到所有路线。 */
+export type SamplePlanInput = { name: string; groupIds: string[]; startDate: string; days: number; startTime: string; intervalMinutes: number };
+export type SamplePlanResult = { tasks: number; groups: number; sendsPerDay: number; firstAt: string; lastAt: string };
 export type SampleDataResult = { name: string; materials: number; images: number; routes: number; contents: number; skipped: number; weatherCities: string[] };
 
 // ───────── 路线管理 ─────────
@@ -263,6 +266,7 @@ export interface OpsApi {
   'material.imageData'(input: { imageId: string }): Promise<string | null>;
   /** 导入随程序附带的示例数据（素材 + 图片 + 路线 + 已审核群文案），重复导入会跳过已存在的。 */
   'sample.load'(input: { name: string }): Promise<SampleDataResult>;
+  'sample.planWeek'(input: SamplePlanInput): Promise<SamplePlanResult>;
 
   'route.list'(query: RouteQuery): Promise<Route[]>;
   'route.save'(input: RouteInput): Promise<Route>;

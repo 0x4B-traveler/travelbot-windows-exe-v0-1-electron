@@ -20,6 +20,7 @@ export function registerOpsApi(services: OpsServices) {
     'material.removeImage': ({ id, imageId }) => materials.removeImage(id, imageId),
     'material.imageData': ({ imageId }) => materials.imageData(imageId),
     'sample.load': ({ name }) => samples.load(String(name ?? '')),
+    'sample.planWeek': input => samples.planWeek(input),
 
     'route.list': query => routes.list(query ?? {}),
     'route.save': input => routes.save(input),

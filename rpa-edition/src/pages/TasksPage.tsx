@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { call, formatTime, toLocalInput } from '../api';
-import { TASK_REPEAT_LABELS, TASK_STATUS_LABELS, type DryRunReport, type OpsTask, type TaskInput, type TaskRepeat, type TaskStatus } from '../domain/ops';
+import { TASK_REPEAT_LABELS, TASK_STATUS_LABELS, type SamplePlanResult, type DryRunReport, type OpsTask, type TaskInput, type TaskRepeat, type TaskStatus } from '../domain/ops';
 import { ItineraryPanel } from '../ItineraryPanel';
 import { DailyPushPanel } from '../DailyPushPanel';
 import { Card, Empty, Field, Modal, Notice, Pill, Tabs, useAction, useLoad } from '../ui';
@@ -24,6 +24,7 @@ function TaskList({ presetContentId, onPresetUsed }: { presetContentId?: string;
   const [filter, setFilter] = useState<Filter>('all');
   const [tasks, error, reload] = useLoad(() => call('task.list', {}), []);
   const [creating, setCreating] = useState(Boolean(presetContentId));
+  const [planning, setPlanning] = useState(false);
   const [runsOf, setRunsOf] = useState<OpsTask | null>(null);
   const [report, setReport] = useState<DryRunReport | null>(null);
   const { busy, notice, run } = useAction();
@@ -32,7 +33,7 @@ function TaskList({ presetContentId, onPresetUsed }: { presetContentId?: string;
   const act = (action: () => Promise<unknown>, message: string) => void run(async () => { await action(); await reload(); return message; });
 
   return <>
-    <Card title="运营任务" extra={<div className="inline-actions"><button className="refresh-button" onClick={() => void reload()} title="刷新"><span>↻</span></button><button className="primary" onClick={() => setCreating(true)}>创建任务</button></div>}>
+    <Card title="运营任务" extra={<div className="inline-actions"><button className="refresh-button" onClick={() => void reload()} title="刷新"><span>↻</span></button><button className="secondary" onClick={() => setPlanning(true)}>生成测试排期</button><button className="primary" onClick={() => setCreating(true)}>创建任务</button></div>}>
       <Tabs<Filter> value={filter} onChange={setFilter} options={[{ value: 'all', label: '全部', count: tasks?.length }, ...(['pending', 'running', 'success', 'failed', 'cancelled'] as TaskStatus[]).map(status => ({ value: status, label: TASK_STATUS_LABELS[status], count: count(status) }))]} />
       <Notice notice={notice} />
       {error && <p className="notice error">{error}</p>}
@@ -58,7 +59,40 @@ function TaskList({ presetContentId, onPresetUsed }: { presetContentId?: string;
     {creating && <TaskForm presetContentId={presetContentId} onClose={() => { setCreating(false); onPresetUsed(); }} onCreated={async () => { setCreating(false); onPresetUsed(); await reload(); }} />}
     {runsOf && <RunsDialog task={runsOf} onClose={() => setRunsOf(null)} />}
     {report && <DryRunDialog report={report} onClose={() => setReport(null)} />}
+    {planning && <SamplePlanForm onClose={() => setPlanning(false)} onCreated={async message => { setPlanning(false); await reload(); await run(async () => message); }} />}
   </>;
+}
+
+/** 用云南示例路线给选中的群排一周测试任务（每天轮换路线，一周内每个群收到全部路线）。 */
+function SamplePlanForm({ onClose, onCreated }: { onClose: () => void; onCreated: (message: string) => Promise<void> }) {
+  const [groups, groupError] = useLoad(() => call('group.list'), []);
+  const usable = (groups ?? []).filter(group => group.enabled && group.available);
+  const tomorrow = new Date(Date.now() + 24 * 3600 * 1000);
+  const [startDate, setStartDate] = useState(toLocalInput(tomorrow).slice(0, 10));
+  const [days, setDays] = useState(7);
+  const [startTime, setStartTime] = useState('08:30');
+  const [intervalMinutes, setIntervalMinutes] = useState(35);
+  const { busy, notice, run } = useAction();
+  const slots = Math.min(6, usable.length);
+  const format = (result: SamplePlanResult) => `已生成 ${result.tasks} 个任务：${result.groups} 个群，每天约 ${result.sendsPerDay} 次发送，${formatTime(result.firstAt)} 开始，最后一个 ${formatTime(result.lastAt)}。`;
+
+  return <Modal title="生成测试排期（云南示例数据）" onClose={onClose}>
+    <p className="hint">把全部可用的 {usable.length} 个群分成 {slots} 组，每组在自己的时段收一条示例路线群文案（附该路线城市天气），每天轮换路线，6 天内每个群都会收到全部 6 条路线、覆盖所有景点。需要先在素材库导入云南示例数据。</p>
+    {groupError && <p className="notice error">{groupError}</p>}
+    <div className="form-grid">
+      <Field label="开始日期"><input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} /></Field>
+      <Field label="天数"><input type="number" min={1} max={14} value={days} onChange={event => setDays(Number(event.target.value))} /></Field>
+      <Field label="每天第一次发送"><input type="time" value={startTime} onChange={event => setStartTime(event.target.value)} /></Field>
+      <Field label="各组间隔（分钟）" hint="默认 35 分钟，配合“每小时最多 10 条”"><input type="number" min={10} max={240} value={intervalMinutes} onChange={event => setIntervalMinutes(Number(event.target.value))} /></Field>
+    </div>
+    <Notice notice={notice} />
+    <div className="inline-actions end"><button className="secondary" onClick={onClose}>取消</button>
+      <button className="primary" disabled={busy || !usable.length} onClick={() => void run(async () => {
+        if (!window.confirm(`将为 ${usable.length} 个群创建 ${slots * days} 个任务，到时间会真实发送。确定吗？`)) return '';
+        await onCreated(format(await call('sample.planWeek', { name: 'yunnan', groupIds: usable.map(group => group.id), startDate, days, startTime, intervalMinutes })));
+      })}>生成</button>
+    </div>
+  </Modal>;
 }
 
 function TaskForm({ presetContentId, onClose, onCreated }: { presetContentId?: string; onClose: () => void; onCreated: () => Promise<void> }) {

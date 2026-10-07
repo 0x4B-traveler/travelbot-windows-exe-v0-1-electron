@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { MaterialKind, SampleDataResult } from '../../src/domain/ops';
+import type { MaterialKind, SampleDataResult, SamplePlanInput, SamplePlanResult } from '../../src/domain/ops';
 import type { MaterialRepository } from '../infrastructure/repositories';
 import type { FileStore } from './ports';
-import { OpsError, type ContentService, type LogService, type RouteService } from './services';
+import { OpsError, type ContentService, type LogService, type RouteService, type TaskService } from './services';
 
 // 示例数据：把 sample-data/<name>/seed.json 里的素材（带图片）、路线导入，并为每条路线生成一条已审核的群文案，
 // 方便不录入真实资料就能完整测试“任务 → 发送文字 + 攻略图/路线图 + 天气”。重复导入会跳过同名素材和路线。
@@ -21,13 +21,57 @@ export class SampleDataService {
     private readonly routes: RouteService,
     private readonly contents: ContentService,
     private readonly logs: LogService,
+    private readonly tasks: TaskService,
   ) {}
 
-  async load(name: string): Promise<SampleDataResult> {
+  private seed(name: string): { dir: string; seed: Seed } {
     const dir = join(this.root, name);
     const seedFile = join(dir, 'seed.json');
     if (!/^[a-z0-9-]+$/.test(name) || !existsSync(seedFile)) throw new OpsError(`找不到示例数据“${name}”`);
-    const seed = JSON.parse(readFileSync(seedFile, 'utf8')) as Seed;
+    return { dir, seed: JSON.parse(readFileSync(seedFile, 'utf8')) as Seed };
+  }
+
+  /**
+   * 一周测试排期：群按示例路线数分成几组，每个时段一组群收一条路线文案（附路线天气），
+   * 每天轮换路线，路线数天之内每个群都会收到全部路线（覆盖全部景点）。都是“仅一次”任务，可在运营任务里逐个取消。
+   */
+  planWeek(input: SamplePlanInput): SamplePlanResult {
+    const { seed } = this.seed(input.name);
+    const groupIds = [...new Set(input.groupIds ?? [])];
+    if (!groupIds.length) throw new OpsError('请至少选择一个群');
+    const days = Math.min(14, Math.max(1, Math.round(input.days) || 7));
+    const interval = Math.min(240, Math.max(10, Math.round(input.intervalMinutes) || 35));
+    const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input.startDate ?? '');
+    const time = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(input.startTime ?? '');
+    if (!date || !time) throw new OpsError('请填写开始日期和第一次发送时间');
+    const approved = this.contents.list('approved').concat(this.contents.list('scheduled'), this.contents.list('sent'));
+    const plan = seed.routes.map(item => {
+      const route = this.routes.list({ text: item.name }).find(candidate => candidate.name === item.name);
+      const piece = route && approved.find(candidate => candidate.routeId === route.id && candidate.channel === '群文案');
+      return piece ? { contentId: piece.id, weatherCity: item.weatherCity } : null;
+    }).filter((item): item is { contentId: string; weatherCity: string } => Boolean(item));
+    if (!plan.length) throw new OpsError('还没有示例路线的群文案，请先在素材库导入示例数据');
+    // 群按顺序轮流分到各组，组数不超过路线数。
+    const buckets = Array.from({ length: Math.min(plan.length, groupIds.length) }, () => [] as string[]);
+    groupIds.forEach((id, index) => buckets[index % buckets.length].push(id));
+    const firstAt = new Date(Number(date[1]), Number(date[2]) - 1, Number(date[3]), Number(time[1]), Number(time[2]));
+    if (firstAt.getTime() < Date.now()) throw new OpsError('第一次发送时间已经过去了，请从明天开始');
+    const runs: Date[] = [];
+    for (let day = 0; day < days; day += 1) {
+      buckets.forEach((bucket, slot) => {
+        const runAt = new Date(Number(date[1]), Number(date[2]) - 1, Number(date[3]) + day, Number(time[1]), Number(time[2]) + slot * interval);
+        const item = plan[(slot + day) % plan.length];
+        this.tasks.create({ contentId: item.contentId, groupIds: bucket, runAt: runAt.toISOString(), repeat: 'once', weatherCity: item.weatherCity });
+        runs.push(runAt);
+      });
+    }
+    const result = { tasks: runs.length, groups: groupIds.length, sendsPerDay: groupIds.length, firstAt: runs[0].toISOString(), lastAt: runs[runs.length - 1].toISOString() };
+    this.logs.write({ module: 'Scheduler', action: '生成测试排期', status: 'ok', message: `${seed.name}：${result.groups} 个群、${days} 天、共 ${result.tasks} 个任务` });
+    return result;
+  }
+
+  async load(name: string): Promise<SampleDataResult> {
+    const { dir, seed } = this.seed(name);
     const result: SampleDataResult = { name: seed.name, materials: 0, images: 0, routes: 0, contents: 0, skipped: 0, weatherCities: [] };
 
     const ids = new Map<string, string>();
