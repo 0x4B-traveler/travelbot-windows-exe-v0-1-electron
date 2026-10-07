@@ -142,6 +142,9 @@ export const isManualGroup = (group: Pick<OpsGroup, 'chatId'>) => group.chatId.s
 // ───────── 发送方式（客户群怎么发出去） ─────────
 /** api：企业微信“客户群群发”接口，群主确认后发出；rpa：自动操作本机的企业微信 / 微信客户端，搜索群名后粘贴发送。 */
 export type SendMode = 'api' | 'rpa';
+/** 安装包版本：RPA 版只走桌面客户端，接口版只走企业微信接口，打包时决定（scripts/build.js）。 */
+export type Edition = SendMode;
+export const EDITION_LABELS: Record<Edition, string> = { rpa: 'RPA 版', api: '接口版' };
 export const SEND_MODE_LABELS: Record<SendMode, string> = { api: '企业微信接口（API）', rpa: '桌面客户端（RPA）' };
 export type RpaClient = 'wecom' | 'wechat';
 export const RPA_CLIENT_LABELS: Record<RpaClient, string> = { wecom: '企业微信', wechat: '微信' };

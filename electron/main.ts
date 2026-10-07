@@ -17,7 +17,8 @@ import { PowerShellRpaGateway } from './infrastructure/desktop-rpa';
 import { JsonSendSettingsStore } from './infrastructure/settings-store';
 import { lanAddresses, RemoteRpaAccount, RpaAgentServer } from './infrastructure/rpa-agent';
 import { RpaExecutor } from './application/rpa-executor';
-import { LOCAL_ACCOUNT_ID, type RpaAccount, type SendSettings } from '../src/domain/ops';
+import { appEdition } from './edition';
+import { EDITION_LABELS, LOCAL_ACCOUNT_ID, type RpaAccount, type SendSettings } from '../src/domain/ops';
 import { ContentService, DashboardService, DistributionService, GroupService, LogService, MaterialService, RouteService, SendSettingsService, TaskService } from './application/services';
 import type { BotGateway, CustomerGroupGateway, RpaAccountClient, WeatherGateway } from './application/ports';
 import { registerOpsApi } from './api/ops-ipc';
@@ -277,7 +278,7 @@ function setupOps(database: TravelDatabase) {
   const routes = new RouteService(routeRepo, materialRepo);
   const taskRepo = new TaskRepository(db);
   // 发送方式：客户群走企业微信接口还是桌面客户端 RPA，在设置里切换，DistributionService 每次发送时读取
-  const sendStore = new JsonSendSettingsStore(join(app.getPath('userData'), 'send-settings.json'));
+  const sendStore = new JsonSendSettingsStore(join(app.getPath('userData'), 'send-settings.json'), appEdition());
   const rpa = new PowerShellRpaGateway(() => sendStore.get().rpa, join(app.getPath('userData'), 'rpa'));
   // 账号池：本机账号用执行器直接发；远程账号转给局域网里的执行端。本机切成执行端时启动局域网服务
   const localRpa = new RpaExecutor(LOCAL_ACCOUNT_ID, rpa, () => sendStore.get().rpa, logs);
@@ -300,7 +301,7 @@ function setupOps(database: TravelDatabase) {
   tasks.recoverAfterRestart();
   logs.prune();
   registerOpsApi({ dashboard, materials, routes, contents, tasks, groups, logs, sendSettings });
-  logs.write({ module: 'System', action: '启动', status: 'info', message: `旅游运营助手 ${app.getVersion()} 已启动` });
+  logs.write({ module: 'System', action: '启动', status: 'info', message: `旅游运营助手 ${app.getVersion()}（${EDITION_LABELS[appEdition()]}）已启动` });
   // 调度器：每 30 秒检查一次到点的运营任务
   const tick = () => { void tasks.runDue().catch(error => logs.write({ module: 'Scheduler', action: '调度', status: 'fail', message: error?.message || String(error) })); };
   opsTimer = setInterval(tick, 30 * 1000);

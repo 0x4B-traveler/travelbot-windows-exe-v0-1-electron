@@ -253,9 +253,9 @@ export class SendSettingsService {
 
   save(input: SendSettings): SendSettings {
     const previous = this.store.get();
-    const next: SendSettings = { mode: input?.mode === 'rpa' ? 'rpa' : 'api', rpa: normalizeRpa(input?.rpa), pool: normalizePool(input?.pool, previous.pool) };
+    // 发送方式由安装包版本决定，界面传什么都按当前版本保存
+    const next: SendSettings = { mode: previous.mode, rpa: normalizeRpa(input?.rpa), pool: normalizePool(input?.pool, previous.pool) };
     this.store.save(next);
-    if (previous.mode !== next.mode) this.logs.write({ module: 'System', action: '切换发送方式', status: 'info', message: next.mode === 'rpa' ? `客户群改为 RPA 发送（${RPA_CLIENT_LABELS[next.rpa.client]}桌面客户端）` : '客户群改为企业微信接口发送' });
     if (previous.pool.role !== next.pool.role) this.logs.write({ module: 'System', action: '切换本机角色', status: 'info', message: next.pool.role === 'agent' ? `本机改为执行端，监听端口 ${next.pool.agentPort}` : '本机改为主控' });
     this.onChange(next);
     return next;

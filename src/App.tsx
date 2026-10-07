@@ -7,6 +7,8 @@ import { TasksPage } from './pages/TasksPage';
 import { GroupsPage } from './pages/GroupsPage';
 import { LogsPage } from './pages/LogsPage';
 import { checkAuth, SettingsPage, type ConnectionState } from './pages/SettingsPage';
+import { EDITION } from './edition';
+import { EDITION_LABELS } from './domain/ops';
 
 export type PageKey = 'home' | 'materials' | 'routes' | 'content' | 'tasks' | 'groups' | 'logs' | 'settings';
 
@@ -19,7 +21,7 @@ const MENU: Array<{ key: PageKey; icon: string; label: string; desc: string }> =
   { key: 'groups', icon: '◎', label: '群管理', desc: '维护可发送的群，测试发送能力' },
   { key: 'logs', icon: '☰', label: '运行日志', desc: '执行记录和错误排查' },
 ];
-const SETTINGS = { key: 'settings' as const, icon: '⚙', label: '设置', desc: '企业微信授权和客户群群发配置' };
+const SETTINGS = { key: 'settings' as const, icon: '⚙', label: '设置', desc: EDITION === 'rpa' ? '机器人授权、RPA 发送、防封和账号池' : '机器人授权和客户群群发接口配置' };
 
 export function App() {
   const [page, setPage] = useState<PageKey>('home');
@@ -31,7 +33,7 @@ export function App() {
 
   return <div className="layout">
     <aside className="sidebar">
-      <div className="brand"><div className="logo">旅</div><div><strong>旅游运营助手</strong><span className="eyebrow">TRAVEL OPS</span></div></div>
+      <div className="brand"><div className="logo">旅</div><div><strong>旅游运营助手</strong><span className="eyebrow">TRAVEL OPS · {EDITION_LABELS[EDITION]}</span></div></div>
       <nav>{MENU.map(item => <button key={item.key} className={`nav-item ${page === item.key ? 'active' : ''}`} onClick={() => setPage(item.key)}><span className="nav-icon">{item.icon}</span>{item.label}</button>)}</nav>
       <button className={`sidebar-status ${connection === 'authorized' ? 'authorized' : connection}`} onClick={() => setPage('settings')}><i />{connection === 'authorized' ? '企业微信已连接' : connection === 'checking' ? '正在检查连接…' : '企业微信未连接'}</button>
     </aside>

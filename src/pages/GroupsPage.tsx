@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { call, formatTime } from '../api';
+import { EDITION } from '../edition';
 import { GROUP_CHANNEL_LABELS, RPA_CLIENT_LABELS, groupCapabilities, isManualGroup, resolveAccount, type OpsGroup, type SendSettings } from '../domain/ops';
 import { Card, Empty, Modal, Notice, Pill, useAction, useLoad } from '../ui';
 
@@ -25,10 +26,10 @@ export function GroupsPage() {
   });
 
   return <>
-    <Card title={`群（${groups?.length ?? 0}）`} extra={<span className="inline-actions"><button className="secondary" disabled={busy} onClick={() => setAdding(true)}>手动添加群</button><button className="primary" disabled={busy} onClick={refresh}>{busy ? '刷新中…' : '刷新群列表'}</button></span>}>
+    <Card title={`群（${groups?.length ?? 0}）`} extra={<span className="inline-actions">{EDITION === 'rpa' && <button className="secondary" disabled={busy} onClick={() => setAdding(true)}>手动添加群</button>}<button className="primary" disabled={busy} onClick={refresh}>{busy ? '刷新中…' : '刷新群列表'}</button></span>}>
       <p className="hint">{rpaMode
         ? `当前发送方式：桌面客户端（RPA）。客户群会在${RPA_CLIENT_LABELS[send!.rpa.client]}里按群名搜索后直接发出${multiAccount ? '，由“发送账号”那台电脑上的账号发，点开群可以换账号' : ''}；没有接口时可用“手动添加群”按群名添加。机器人群仍由机器人直接发送。`
-        : '当前发送方式：企业微信接口。机器人群：智能机器人所在的群聊，消息直接发出。客户群：通过“客户群群发”创建任务，群主在企业微信里确认后才发出。可在“设置”里切换为 RPA。'}</p>
+        : '当前发送方式：企业微信接口。机器人群：智能机器人所在的群聊，消息直接发出。客户群：通过“客户群群发”创建任务，群主在企业微信里确认后才发出。'}</p>
       <Notice notice={notice} />
       {error && <p className="notice error">{error}</p>}
       {groups?.length ? <table className="ops-table clickable">

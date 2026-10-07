@@ -8,7 +8,10 @@
   "private": true,
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
-    "build": "tsc -p tsconfig.json && vite build && electron-builder --win --x64",
+    "dev:api": "cross-env TRAVELBOT_EDITION=api npm run dev",
+    "build": "node scripts/build.js rpa",
+    "build:rpa": "node scripts/build.js rpa",
+    "build:api": "node scripts/build.js api",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "preview": "vite preview"
   },

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { call, formatTime, toLocalInput } from '../api';
 import { GROUP_CHANNEL_LABELS, TASK_REPEAT_LABELS, TASK_STATUS_LABELS, type DryRunReport, type OpsTask, type TaskInput, type TaskRepeat, type TaskStatus } from '../domain/ops';
 import { ItineraryPanel } from '../ItineraryPanel';
+import { EDITION } from '../edition';
 import { DailyPushPanel } from '../DailyPushPanel';
 import { Card, Empty, Field, Modal, Notice, Pill, Tabs, useAction, useLoad } from '../ui';
 
@@ -13,7 +14,8 @@ type Filter = TaskStatus | 'all';
 export function TasksPage({ presetContentId, onPresetUsed }: { presetContentId?: string; onPresetUsed: () => void }) {
   const [source, setSource] = useState<Source>('tasks');
   return <>
-    <Tabs<Source> value={source} onChange={setSource} options={[{ value: 'tasks', label: '运营任务' }, { value: 'itinerary', label: '旅游团行程提醒' }, { value: 'daily', label: '每日推送' }]} />
+    {/* 行程提醒、每日推送依赖企业微信接口，只在接口版显示 */}
+    {EDITION === 'api' && <Tabs<Source> value={source} onChange={setSource} options={[{ value: 'tasks', label: '运营任务' }, { value: 'itinerary', label: '旅游团行程提醒' }, { value: 'daily', label: '每日推送' }]} />}
     {source === 'tasks' && <TaskList presetContentId={presetContentId} onPresetUsed={onPresetUsed} />}
     {source === 'itinerary' && <ItineraryPanel />}
     {source === 'daily' && <DailyPushPanel />}

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import type { GroupMessageConfigView } from '../domain/business';
 import { call } from '../api';
-import { DEFAULT_AGENT_PORT, POOL_ROLE_LABELS, RPA_CLIENT_LABELS, SEND_MODE_LABELS, type AccountStatus, type PoolRole, type PoolSettings, type RpaAccount, type RpaClient, type RpaGuard, type RpaSettings, type SendMode, type SendSettings } from '../domain/ops';
-import { Card, Field, Notice, Tabs, useAction } from '../ui';
+import { DEFAULT_AGENT_PORT, POOL_ROLE_LABELS, RPA_CLIENT_LABELS, type AccountStatus, type PoolRole, type PoolSettings, type RpaAccount, type RpaClient, type RpaGuard, type RpaSettings, type SendSettings } from '../domain/ops';
+import { Card, Field, Notice, useAction } from '../ui';
+import { EDITION } from '../edition';
 
 export type ConnectionState = 'checking' | 'unauthorized' | 'authorizing' | 'authorized' | 'error';
 
@@ -10,42 +11,36 @@ export type ConnectionState = 'checking' | 'unauthorized' | 'authorizing' | 'aut
 export function SettingsPage({ connection, onConnectionChange }: { connection: ConnectionState; onConnectionChange: (state: ConnectionState) => void }) {
   return <>
     <AuthCard state={connection} onChange={onConnectionChange} />
-    <SendModeCard />
+    {EDITION === 'rpa' ? <SendModeCard /> : <GroupMessageConfigCard />}
   </>;
 }
 
-/** 客户群发送方式切换：接口模式显示企业微信接口配置，RPA 模式显示桌面客户端配置。保存后立即生效。 */
+/** RPA 版的客户群发送设置：桌面客户端、防封规则、账号池。接口版显示企业微信接口配置。保存后立即生效。 */
 function SendModeCard() {
   const [saved, setSaved] = useState<SendSettings | null>(null);
-  const [mode, setMode] = useState<SendMode>('api');
   const [rpa, setRpa] = useState<RpaSettings | null>(null);
   const [pool, setPool] = useState<PoolSettings | null>(null);
   const [agent, setAgent] = useState<Awaited<ReturnType<typeof loadAgent>> | null>(null);
   const { busy, notice, run } = useAction();
-  const apply = (value: SendSettings) => { setSaved(value); setMode(value.mode); setRpa(value.rpa); setPool(value.pool); };
+  const apply = (value: SendSettings) => { setSaved(value); setRpa(value.rpa); setPool(value.pool); };
   useEffect(() => { void call('settings.getSend').then(apply); void loadAgent().then(setAgent); }, []);
   if (!saved || !rpa || !pool) return <Card title="客户群发送方式"><p className="hint">正在加载…</p></Card>;
   const patch = (next: Partial<RpaSettings>) => setRpa({ ...rpa, ...next });
   const guard = rpa.guard;
   const patchGuard = (next: Partial<RpaGuard>) => setRpa({ ...rpa, guard: { ...guard, ...next } });
   const num = (key: keyof RpaGuard) => (event: React.ChangeEvent<HTMLInputElement>) => patchGuard({ [key]: Number(event.target.value) } as Partial<RpaGuard>);
-  const dirty = mode !== saved.mode || JSON.stringify(rpa) !== JSON.stringify(saved.rpa) || JSON.stringify(pool) !== JSON.stringify(saved.pool);
+  const dirty = JSON.stringify(rpa) !== JSON.stringify(saved.rpa) || JSON.stringify(pool) !== JSON.stringify(saved.pool);
   const save = () => void run(async () => {
-    const next = await call('settings.saveSend', { mode, rpa, pool });
+    const next = await call('settings.saveSend', { mode: saved.mode, rpa, pool });
     apply(next);
     // 执行端的局域网服务是异步启动的，稍等再读状态
     window.setTimeout(() => void loadAgent().then(setAgent), 800);
-    if (next.mode !== 'rpa') return '已切换为企业微信接口发送';
     return next.pool.role === 'agent' ? '已保存：本机作为执行端，等待主控发来的发送指令' : `已保存：客户群按账号池发送（${next.pool.accounts.filter(account => account.enabled).length} 个可用账号）`;
   });
   const isAgent = pool.role === 'agent';
   const label = RPA_CLIENT_LABELS[rpa.client];
   return <>
-    <Card title="客户群发送方式" extra={saved.mode !== mode ? <span className="hint">未保存</span> : undefined}>
-      <Tabs<SendMode> value={mode} onChange={setMode} options={(Object.keys(SEND_MODE_LABELS) as SendMode[]).map(value => ({ value, label: `${SEND_MODE_LABELS[value]}${saved.mode === value ? ' · 当前' : ''}` }))} />
-      {mode === 'api'
-        ? <p className="hint">通过企业微信“客户群群发”接口创建任务，群主在企业微信里确认后发出。需要配置企业 ID、Secret，并把本机公网 IP 加入企业可信 IP。机器人群不受影响，始终由机器人直接发送。</p>
-        : <>
+    <Card title="客户群发送（RPA）">
           <p className="hint">程序会自动操作已登录的{label}：切到前台 → 搜索群名 → 进入群聊 → 粘贴内容 → 发送。不需要接口权限和可信 IP，群可以在“群管理”里按群名手动添加。发送时会占用屏幕和剪贴板几秒钟，电脑锁屏时无法发送；群名请保持唯一，程序会进入搜索结果的第一个。</p>
           <Field label="本机角色" group hint="一个企业微信账号只能稳定登录一台电脑，多个账号就用多台电脑：一台主控管内容、任务和群，其他电脑做执行端，各自用自己的账号发。"><div className="radio-row">{(Object.keys(POOL_ROLE_LABELS) as PoolRole[]).map(value => <label key={value} className="toggle-row"><input type="radio" checked={pool.role === value} onChange={() => setPool({ ...pool, role: value })} />{POOL_ROLE_LABELS[value]}{value === 'master' ? '（管内容、任务和群）' : '（只接收主控的发送指令）'}</label>)}</div></Field>
           {isAgent && <div className="preview-box">
@@ -87,14 +82,13 @@ function SendModeCard() {
           </div>
           <label className="toggle-row"><input type="checkbox" checked={guard.varyOpening} onChange={event => patchGuard({ varyOpening: event.target.checked })} />开头随机加一句问候（如“大家早上好！”），让多个群收到的文字不完全一样</label>
           {!isAgent && <AccountPool pool={pool} onChange={setPool} />}
-        </>}
+
       <Notice notice={notice} />
       <div className="actions">
-        {mode === 'rpa' && <button className="secondary" disabled={busy} onClick={() => void run(() => call('settings.checkRpa', { rpa }))}>检测本机客户端</button>}
-        <button className="primary" disabled={busy || !dirty} onClick={save}>{saved.mode !== mode ? `切换为${SEND_MODE_LABELS[mode]}` : '保存'}</button>
+        <button className="secondary" disabled={busy} onClick={() => void run(() => call('settings.checkRpa', { rpa }))}>检测本机客户端</button>
+        <button className="primary" disabled={busy || !dirty} onClick={save}>保存</button>
       </div>
     </Card>
-    {mode === 'api' && <GroupMessageConfigCard />}
   </>;
 }
 
