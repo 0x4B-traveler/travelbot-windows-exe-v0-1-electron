@@ -1,14 +1,61 @@
 import React, { useEffect, useState } from 'react';
 import type { GroupMessageConfigView } from '../domain/business';
-import { Card, Field, Notice, useAction } from '../ui';
+import { call } from '../api';
+import { RPA_CLIENT_LABELS, SEND_MODE_LABELS, type RpaClient, type RpaSettings, type SendMode, type SendSettings } from '../domain/ops';
+import { Card, Field, Notice, Tabs, useAction } from '../ui';
 
 export type ConnectionState = 'checking' | 'unauthorized' | 'authorizing' | 'authorized' | 'error';
 
-/** 设置：企业微信机器人扫码授权、客户群群发配置。不属于核心业务模块。 */
+/** 设置：企业微信机器人扫码授权、客户群发送方式（接口 / RPA）。不属于核心业务模块。 */
 export function SettingsPage({ connection, onConnectionChange }: { connection: ConnectionState; onConnectionChange: (state: ConnectionState) => void }) {
   return <>
     <AuthCard state={connection} onChange={onConnectionChange} />
-    <GroupMessageConfigCard />
+    <SendModeCard />
+  </>;
+}
+
+/** 客户群发送方式切换：接口模式显示企业微信接口配置，RPA 模式显示桌面客户端配置。保存后立即生效。 */
+function SendModeCard() {
+  const [saved, setSaved] = useState<SendSettings | null>(null);
+  const [mode, setMode] = useState<SendMode>('api');
+  const [rpa, setRpa] = useState<RpaSettings | null>(null);
+  const { busy, notice, run } = useAction();
+  useEffect(() => { void call('settings.getSend').then(value => { setSaved(value); setMode(value.mode); setRpa(value.rpa); }); }, []);
+  if (!saved || !rpa) return <Card title="客户群发送方式"><p className="hint">正在加载…</p></Card>;
+  const patch = (next: Partial<RpaSettings>) => setRpa({ ...rpa, ...next });
+  const dirty = mode !== saved.mode || JSON.stringify(rpa) !== JSON.stringify(saved.rpa);
+  const save = () => void run(async () => {
+    const next = await call('settings.saveSend', { mode, rpa });
+    setSaved(next); setMode(next.mode); setRpa(next.rpa);
+    return next.mode === 'rpa' ? `已切换为 RPA：客户群将通过本机${RPA_CLIENT_LABELS[next.rpa.client]}发送` : '已切换为企业微信接口发送';
+  });
+  const label = RPA_CLIENT_LABELS[rpa.client];
+  return <>
+    <Card title="客户群发送方式" extra={saved.mode !== mode ? <span className="hint">未保存</span> : undefined}>
+      <Tabs<SendMode> value={mode} onChange={setMode} options={(Object.keys(SEND_MODE_LABELS) as SendMode[]).map(value => ({ value, label: `${SEND_MODE_LABELS[value]}${saved.mode === value ? ' · 当前' : ''}` }))} />
+      {mode === 'api'
+        ? <p className="hint">通过企业微信“客户群群发”接口创建任务，群主在企业微信里确认后发出。需要配置企业 ID、Secret，并把本机公网 IP 加入企业可信 IP。机器人群不受影响，始终由机器人直接发送。</p>
+        : <>
+          <p className="hint">程序会自动操作本机已登录的{label}：切到前台 → 搜索群名 → 进入群聊 → 粘贴内容 → 发送。不需要接口权限和可信 IP，群可以在“群管理”里按群名手动添加。发送时会占用屏幕和剪贴板几秒钟，电脑锁屏时无法发送；群名请保持唯一，程序会进入搜索结果的第一个。</p>
+          <Field label="操作哪个客户端" group><div className="radio-row">{(Object.keys(RPA_CLIENT_LABELS) as RpaClient[]).map(value => <label key={value} className="toggle-row"><input type="radio" checked={rpa.client === value} onChange={() => patch({ client: value })} />{RPA_CLIENT_LABELS[value]}</label>)}</div></Field>
+          <Field label="发送方式" group><div className="radio-row">
+            <label className="toggle-row"><input type="radio" checked={rpa.autoSend} onChange={() => patch({ autoSend: true })} />自动发送</label>
+            <label className="toggle-row"><input type="radio" checked={!rpa.autoSend} onChange={() => patch({ autoSend: false })} />只粘贴，人工按发送（试跑用）</label>
+          </div></Field>
+          <div className="form-grid">
+            <Field label="发送键" hint={`和${label}“设置 → 快捷键”里的发送消息保持一致`}><select value={rpa.sendKey} onChange={event => patch({ sendKey: event.target.value as RpaSettings['sendKey'] })}><option value="enter">Enter</option><option value="ctrlEnter">Ctrl + Enter</option></select></Field>
+            <Field label="搜索快捷键" hint="^ 表示 Ctrl，% 表示 Alt，默认 ^f（Ctrl+F）"><input value={rpa.searchHotkey} onChange={event => patch({ searchHotkey: event.target.value })} /></Field>
+            <Field label="每步等待（毫秒）" hint="电脑或网络较慢、搜索结果出来得慢时调大"><input type="number" min={200} max={5000} step={100} value={rpa.stepDelayMs} onChange={event => patch({ stepDelayMs: Number(event.target.value) })} /></Field>
+            <Field label="客户端路径（可选）" hint={`${label}没打开时自动启动，例如 C:\\Program Files\\…\\${rpa.client === 'wecom' ? 'WXWork.exe' : 'Weixin.exe'}`}><input value={rpa.clientPath} onChange={event => patch({ clientPath: event.target.value })} placeholder="留空则需要手动打开客户端" /></Field>
+          </div>
+        </>}
+      <Notice notice={notice} />
+      <div className="actions">
+        {mode === 'rpa' && <button className="secondary" disabled={busy} onClick={() => void run(() => call('settings.checkRpa', { rpa }))}>检测客户端</button>}
+        <button className="primary" disabled={busy || !dirty} onClick={save}>{saved.mode !== mode ? `切换为${SEND_MODE_LABELS[mode]}` : '保存'}</button>
+      </div>
+    </Card>
+    {mode === 'api' && <GroupMessageConfigCard />}
   </>;
 }
 

@@ -1,4 +1,4 @@
-import type { ContentChannel, Material, Route } from '../../src/domain/ops';
+import type { ContentChannel, Material, Route, RpaSettings, SendSettings } from '../../src/domain/ops';
 
 // Application 层依赖的外部能力（端口）。具体实现放在 Infrastructure，由 main.ts 组装注入，
 // 这样以后把企业微信换成官方接口 / UI 自动化，或者把模板生成换成大模型，都不用动业务服务。
@@ -15,6 +15,19 @@ export interface CustomerGroupGateway {
   defaultSender(): string;
   listGroups(owners: string[]): Promise<Array<{ chatId: string; name: string; owner: string; memberCount: number }>>;
   createGroupMessage(input: { sender: string; chatIds: string[]; content: string }): Promise<{ msgid: string; failList: string[] }>;
+}
+
+/** 桌面客户端 RPA：在本机企业微信 / 微信里按群名搜索并发送，不需要接口权限和可信 IP。 */
+export interface DesktopRpaGateway {
+  /** 只检查能否找到客户端窗口，不发送。override 用于保存前先试一下界面上的设置。 */
+  check(override?: RpaSettings): Promise<string>;
+  /** sent=false 表示按设置只粘贴到了输入框，等人工按发送。 */
+  sendText(groupName: string, text: string): Promise<{ sent: boolean }>;
+}
+
+export interface SendSettingsStore {
+  get(): SendSettings;
+  save(settings: SendSettings): void;
 }
 
 export interface WeatherGateway {

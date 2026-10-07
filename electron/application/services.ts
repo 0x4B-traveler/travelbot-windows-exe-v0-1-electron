@@ -6,9 +6,10 @@ import {
   type GenerateInput, type GroupMatchMode, type ImportResult, type LogEntry, type LogQuery, type Material, type MaterialFacets,
   type MaterialInput, type MaterialKind, type MaterialQuery, type OpsGroup, type OpsTask, type RefreshResult, type Route, type RouteInput,
   type RouteQuery, type TaskInput, type TaskRepeat, type TaskRun, type TaskStatus,
+  DEFAULT_SEND_SETTINGS, MANUAL_CHAT_PREFIX, RPA_CLIENT_LABELS, isManualGroup, type RpaSettings, type SendSettings,
 } from '../../src/domain/ops';
 import { ContentRepository, GroupRepository, LogRepository, MaterialRepository, RouteRepository, TaskRepository, type StoredTask } from '../infrastructure/repositories';
-import type { BotGateway, ContentGenerator, CustomerGroupGateway, FilePicker, FileStore, WeatherGateway } from './ports';
+import type { BotGateway, ContentGenerator, CustomerGroupGateway, DesktopRpaGateway, FilePicker, FileStore, SendSettingsStore, WeatherGateway } from './ports';
 
 // Application 层：每个服务只管自己模块的业务规则，跨模块协作通过调用其他服务，不直接碰别人的表或企业微信。
 
@@ -220,9 +221,50 @@ export class ContentService {
   }
 }
 
+// ───────── 发送方式（设置） ─────────
+export class SendSettingsService {
+  constructor(private readonly store: SendSettingsStore, private readonly rpa: DesktopRpaGateway, private readonly logs: LogService) {}
+
+  get(): SendSettings { return this.store.get(); }
+
+  save(input: SendSettings): SendSettings {
+    const next: SendSettings = { mode: input?.mode === 'rpa' ? 'rpa' : 'api', rpa: normalizeRpa(input?.rpa) };
+    const previous = this.store.get();
+    this.store.save(next);
+    if (previous.mode !== next.mode) this.logs.write({ module: 'System', action: '切换发送方式', status: 'info', message: next.mode === 'rpa' ? `客户群改为 RPA 发送（${RPA_CLIENT_LABELS[next.rpa.client]}桌面客户端）` : '客户群改为企业微信接口发送' });
+    return next;
+  }
+
+  async checkRpa(override?: RpaSettings): Promise<string> {
+    const settings = override ? normalizeRpa(override) : this.store.get().rpa;
+    try {
+      const detail = await this.rpa.check(settings);
+      this.logs.write({ module: 'RPA', action: '检测客户端', status: 'ok', message: detail });
+      return detail;
+    } catch (error: any) {
+      const message = error?.message || String(error);
+      this.logs.write({ module: 'RPA', action: '检测客户端', status: 'fail', message });
+      throw new OpsError(message);
+    }
+  }
+}
+
+function normalizeRpa(input?: Partial<RpaSettings>): RpaSettings {
+  const base = DEFAULT_SEND_SETTINGS.rpa;
+  const delay = Number(input?.stepDelayMs);
+  return {
+    client: input?.client === 'wechat' ? 'wechat' : 'wecom',
+    autoSend: input?.autoSend ?? base.autoSend,
+    sendKey: input?.sendKey === 'ctrlEnter' ? 'ctrlEnter' : 'enter',
+    searchHotkey: String(input?.searchHotkey ?? '').trim() || base.searchHotkey,
+    stepDelayMs: Number.isFinite(delay) ? Math.min(5000, Math.max(200, Math.round(delay))) : base.stepDelayMs,
+    clientPath: String(input?.clientPath ?? '').trim(),
+  };
+}
+
 // ───────── 群管理 ─────────
 export class GroupService {
-  constructor(private readonly repo: GroupRepository, private readonly bot: BotGateway, private readonly customer: CustomerGroupGateway, private readonly logs: LogService, private readonly distribution: () => DistributionService) {}
+  constructor(private readonly repo: GroupRepository, private readonly bot: BotGateway, private readonly customer: CustomerGroupGateway, private readonly logs: LogService, private readonly distribution: () => DistributionService, private readonly sendSettings: () => SendSettings) {}
 
   list(): OpsGroup[] { return this.repo.list().map(group => ({ ...group, todaySent: this.logs.sentToday(group.name) })); }
   get(id: string): OpsGroup { const group = this.repo.get(id) ?? fail('群不存在或已被删除'); return { ...group, todaySent: this.logs.sentToday(group.name) }; }
@@ -240,7 +282,7 @@ export class GroupService {
       const sender = this.customer.defaultSender();
       try { (await this.customer.listGroups(sender ? [sender] : [])).forEach(group => fetched.push({ ...group, channel: 'customer' })); customerOk = true; }
       catch (error: any) { warnings.push(`客户群加载失败：${error?.message || error}`); }
-    } else warnings.push('还没有配置客户群群发（企业 ID、Secret、发送人），只加载了机器人群聊');
+    } else if (this.sendSettings().mode === 'api') warnings.push('还没有配置客户群群发（企业 ID、Secret、发送人），只加载了机器人群聊');
 
     const existing = this.repo.list();
     const matched = new Set<string>();
@@ -254,7 +296,7 @@ export class GroupService {
     let missing = 0;
     for (const group of existing) {
       const loaded = group.channel === 'bot' ? botOk : customerOk;
-      if (!matched.has(group.id) && loaded && group.available) { this.repo.upsert({ ...group, available: false }); missing += 1; }
+      if (!matched.has(group.id) && loaded && group.available && !isManualGroup(group)) { this.repo.upsert({ ...group, available: false }); missing += 1; }
     }
     this.logs.write({ module: 'Group', action: '刷新群列表', status: warnings.length && !fetched.length ? 'fail' : 'ok', message: `新增 ${added}，更新 ${updated}，找不到 ${missing}`, detail: warnings.join('\n') || undefined });
     return { added, updated, missing, warnings };
@@ -264,6 +306,30 @@ export class GroupService {
     const group = this.repo.get(input.id) ?? fail('群不存在或已被删除');
     this.repo.upsert({ ...group, enabled: input.enabled ?? group.enabled, matchMode: input.matchMode === 'name' || input.matchMode === 'id' ? input.matchMode : group.matchMode });
     return this.get(group.id);
+  }
+
+  /** 手动添加客户群：RPA 按群名搜索发送，不需要接口。按群名匹配，以后接口能拉到同名群时会自动接上。 */
+  add(names: string[]): OpsGroup[] {
+    const wanted = cleanList(Array.isArray(names) ? names.map(String) : []);
+    if (!wanted.length) fail('请填写群名称');
+    const existing = new Set(this.repo.list().filter(group => group.channel === 'customer').map(group => group.name));
+    const added: OpsGroup[] = [];
+    for (const name of wanted) {
+      if (existing.has(name)) continue;
+      const id = randomUUID();
+      this.repo.upsert({ id, chatId: `${MANUAL_CHAT_PREFIX}${id}`, name, channel: 'customer', owner: '', memberCount: 0, enabled: true, matchMode: 'name', available: true });
+      existing.add(name);
+      added.push(this.get(id));
+    }
+    this.logs.write({ module: 'Group', action: '手动添加群', status: 'ok', message: `新增 ${added.length} 个，跳过已存在 ${wanted.length - added.length} 个`, detail: added.map(group => group.name).join('、') || undefined });
+    return added;
+  }
+
+  delete(id: string) {
+    const group = this.repo.get(id) ?? fail('群不存在或已被删除');
+    if (!isManualGroup(group)) fail('只能删除手动添加的群；接口加载的群请用“停用”');
+    this.repo.delete(id);
+    this.logs.write({ module: 'Group', action: '删除群', status: 'ok', message: group.name });
   }
 
   async testSend(id: string, text: string): Promise<string> {
@@ -279,13 +345,15 @@ export class GroupService {
 export type SendResult = { ok: boolean; detail: string };
 
 export class DistributionService {
-  constructor(private readonly bot: BotGateway, private readonly customer: CustomerGroupGateway, private readonly logs: LogService, private readonly onSent: (groupId: string) => void) {}
+  constructor(private readonly bot: BotGateway, private readonly customer: CustomerGroupGateway, private readonly rpa: DesktopRpaGateway, private readonly sendSettings: () => SendSettings, private readonly logs: LogService, private readonly onSent: (groupId: string) => void) {}
 
   /** 预演：做发送前的全部检查，客户群还会用只读接口确认凭证、可信 IP 和群是否还在，但不创建群发任务。 */
   async dryRun(groups: OpsGroup[], context: { taskId?: string }): Promise<DryRunGroup[]> {
     const results: DryRunGroup[] = [];
     let botChats: Set<string> | null | Error = null;
     const customerChats = new Map<string, Set<string> | Error>();
+    const settings = this.sendSettings();
+    let rpaCheck: string | Error | null = null;
     for (const group of groups) {
       const result = (ok: boolean, detail: string) => {
         results.push({ name: group.name, channel: group.channel, ok, detail });
@@ -300,6 +368,14 @@ export class DistributionService {
         else result(true, '机器人在群里，正式执行时会直接发出');
         continue;
       }
+      if (settings.mode === 'rpa') {
+        const label = RPA_CLIENT_LABELS[settings.rpa.client];
+        if (rpaCheck === null) rpaCheck = await this.rpa.check().catch(error => (error instanceof Error ? error : new Error(String(error))));
+        if (rpaCheck instanceof Error) result(false, rpaCheck.message);
+        else result(true, `${label}客户端正常，正式执行时会在${label}里搜索“${group.name}”并${settings.rpa.autoSend ? '自动发送' : '粘贴到输入框，等人工按发送'}`);
+        continue;
+      }
+      if (isManualGroup(group)) { result(false, '手动添加的群只能用 RPA 发送，请在设置里切换到“桌面客户端（RPA）”'); continue; }
       if (!this.customer.configured()) { result(false, '还没有配置客户群群发（设置 → 客户群群发）'); continue; }
       const sender = group.owner || this.customer.defaultSender();
       if (!sender) { result(false, '缺少群主 userid'); continue; }
@@ -324,6 +400,15 @@ export class DistributionService {
         this.onSent(group.id);
         return { ok: true, detail: `${group.name}：已发送` };
       }
+      const settings = this.sendSettings();
+      if (settings.mode === 'rpa') {
+        const label = RPA_CLIENT_LABELS[settings.rpa.client];
+        const { sent } = await this.rpa.sendText(group.name, text);
+        this.logs.write({ ...base, module: 'RPA', action, status: 'ok', message: sent ? `已通过${label}客户端发送` : `已粘贴到${label}输入框，等待人工按发送` });
+        this.onSent(group.id);
+        return { ok: true, detail: `${group.name}：${sent ? `已通过${label}发送` : `已粘贴到${label}，请人工按发送`}` };
+      }
+      if (isManualGroup(group)) throw new Error('手动添加的群只能用 RPA 发送，请在设置里切换到“桌面客户端（RPA）”');
       if (!this.customer.configured()) throw new Error('还没有配置客户群群发（设置 → 客户群群发）');
       const sender = group.owner || this.customer.defaultSender();
       if (!sender) throw new Error('缺少群主 userid');
@@ -334,7 +419,8 @@ export class DistributionService {
       return { ok: true, detail: `${group.name}：已创建群发任务，等待群主确认` };
     } catch (error: any) {
       const message = error?.message || String(error);
-      this.logs.write({ ...base, action, status: 'fail', message });
+      const module = group.channel === 'customer' && this.sendSettings().mode === 'rpa' ? 'RPA' : 'WeCom';
+      this.logs.write({ ...base, module, action, status: 'fail', message });
       return { ok: false, detail: `${group.name}：${message}` };
     }
   }

@@ -13,7 +13,9 @@ import { ItineraryRunner, ItineraryStore, normalizeName, parseItinerary } from '
 import { migrateOpsSchema, ContentRepository, GroupRepository, LogRepository, MaterialRepository, RouteRepository, TaskRepository } from './infrastructure/repositories';
 import { LocalFileStore } from './infrastructure/file-store';
 import { TemplateContentGenerator } from './infrastructure/template-generator';
-import { ContentService, DashboardService, DistributionService, GroupService, LogService, MaterialService, RouteService, TaskService } from './application/services';
+import { PowerShellRpaGateway } from './infrastructure/desktop-rpa';
+import { JsonSendSettingsStore } from './infrastructure/settings-store';
+import { ContentService, DashboardService, DistributionService, GroupService, LogService, MaterialService, RouteService, SendSettingsService, TaskService } from './application/services';
 import type { BotGateway, CustomerGroupGateway, WeatherGateway } from './application/ports';
 import { registerOpsApi } from './api/ops-ipc';
 
@@ -271,16 +273,20 @@ function setupOps(database: TravelDatabase) {
   const materials = new MaterialService(materialRepo, routeRepo, files, picker);
   const routes = new RouteService(routeRepo, materialRepo);
   const taskRepo = new TaskRepository(db);
+  // 发送方式：客户群走企业微信接口还是桌面客户端 RPA，在设置里切换，DistributionService 每次发送时读取
+  const sendStore = new JsonSendSettingsStore(join(app.getPath('userData'), 'send-settings.json'));
+  const rpa = new PowerShellRpaGateway(() => sendStore.get().rpa, join(app.getPath('userData'), 'rpa'));
+  const sendSettings = new SendSettingsService(sendStore, rpa, logs);
   const contents = new ContentService(new ContentRepository(db), routes, materials, new TemplateContentGenerator(), logs, contentId => taskRepo.byContent(contentId));
   let distribution: DistributionService;
-  const groups = new GroupService(groupRepo, bot, customer, logs, () => distribution);
-  distribution = new DistributionService(bot, customer, logs, groupId => groups.markSent(groupId));
+  const groups = new GroupService(groupRepo, bot, customer, logs, () => distribution, () => sendStore.get());
+  distribution = new DistributionService(bot, customer, rpa, () => sendStore.get(), logs, groupId => groups.markSent(groupId));
   const tasks = new TaskService(taskRepo, contents, groups, distribution, weather, logs);
   const dashboard = new DashboardService(tasks, contents, routes, groups);
   contents.migrateTemplates(db);
   tasks.recoverAfterRestart();
   logs.prune();
-  registerOpsApi({ dashboard, materials, routes, contents, tasks, groups, logs });
+  registerOpsApi({ dashboard, materials, routes, contents, tasks, groups, logs, sendSettings });
   logs.write({ module: 'System', action: '启动', status: 'info', message: `旅游运营助手 ${app.getVersion()} 已启动` });
   // 调度器：每 30 秒检查一次到点的运营任务
   const tick = () => { void tasks.runDue().catch(error => logs.write({ module: 'Scheduler', action: '调度', status: 'fail', message: error?.message || String(error) })); };

@@ -294,6 +294,8 @@ export class GroupRepository {
   }
 
   markSent(id: string, time: string) { this.db.prepare('UPDATE ops_groups SET last_sent_at = ? WHERE id = ?').run(time, id); }
+
+  delete(id: string) { this.db.prepare('DELETE FROM ops_groups WHERE id = ?').run(id); }
 }
 
 function toGroup(row: GroupRow): Omit<OpsGroup, 'todaySent'> {

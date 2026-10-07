@@ -133,9 +133,39 @@ export const GROUP_CAPABILITIES: Record<GroupChannel, GroupCapabilities> = {
   customer: { text: true, image: false, needsConfirm: true },
 };
 export type RefreshResult = { added: number; updated: number; missing: number; warnings: string[] };
+/** 手动添加的群（RPA 模式按群名搜索发送，不需要接口返回的群 ID）。 */
+export const MANUAL_CHAT_PREFIX = 'manual:';
+export const isManualGroup = (group: Pick<OpsGroup, 'chatId'>) => group.chatId.startsWith(MANUAL_CHAT_PREFIX);
+
+// ───────── 发送方式（客户群怎么发出去） ─────────
+/** api：企业微信“客户群群发”接口，群主确认后发出；rpa：自动操作本机的企业微信 / 微信客户端，搜索群名后粘贴发送。 */
+export type SendMode = 'api' | 'rpa';
+export const SEND_MODE_LABELS: Record<SendMode, string> = { api: '企业微信接口（API）', rpa: '桌面客户端（RPA）' };
+export type RpaClient = 'wecom' | 'wechat';
+export const RPA_CLIENT_LABELS: Record<RpaClient, string> = { wecom: '企业微信', wechat: '微信' };
+export type RpaSendKey = 'enter' | 'ctrlEnter';
+export type RpaSettings = {
+  client: RpaClient;
+  /** false：只把内容粘贴进输入框，由人工按发送，适合先试跑。 */
+  autoSend: boolean;
+  /** 客户端里“发送消息”的按键，和客户端设置保持一致。 */
+  sendKey: RpaSendKey;
+  /** 打开搜索框的快捷键（SendKeys 写法，^ 表示 Ctrl、% 表示 Alt），默认 ^f。 */
+  searchHotkey: string;
+  /** 每一步之间的等待毫秒数，电脑较慢时调大。 */
+  stepDelayMs: number;
+  /** 客户端没运行时用来启动它的 exe 路径，可留空。 */
+  clientPath: string;
+};
+export type SendSettings = { mode: SendMode; rpa: RpaSettings };
+export const DEFAULT_SEND_SETTINGS: SendSettings = { mode: 'api', rpa: { client: 'wecom', autoSend: true, sendKey: 'enter', searchHotkey: '^f', stepDelayMs: 800, clientPath: '' } };
+/** 客户群在当前发送方式下的发送能力。 */
+export function groupCapabilities(channel: GroupChannel, mode: SendMode): GroupCapabilities {
+  return channel === 'customer' && mode === 'rpa' ? { text: true, image: false, needsConfirm: false } : GROUP_CAPABILITIES[channel];
+}
 
 // ───────── 运行日志 ─────────
-export type LogModule = 'Scheduler' | 'Task' | 'WeCom' | 'Content' | 'Group' | 'Itinerary' | 'DailyPush' | 'System';
+export type LogModule = 'Scheduler' | 'Task' | 'WeCom' | 'Content' | 'Group' | 'Itinerary' | 'DailyPush' | 'RPA' | 'System';
 export type LogStatus = 'ok' | 'fail' | 'info';
 export type LogEntry = {
   id: string;
@@ -205,6 +235,15 @@ export interface OpsApi {
   'group.refresh'(): Promise<RefreshResult>;
   'group.update'(input: { id: string; enabled?: boolean; matchMode?: GroupMatchMode }): Promise<OpsGroup>;
   'group.testSend'(input: { id: string; text: string }): Promise<string>;
+  /** 手动按群名添加客户群（RPA 模式用，不需要企业微信接口），已存在的同名群会跳过。 */
+  'group.add'(input: { names: string[] }): Promise<OpsGroup[]>;
+  /** 只能删除手动添加的群。 */
+  'group.delete'(input: { id: string }): Promise<void>;
+
+  'settings.getSend'(): Promise<SendSettings>;
+  'settings.saveSend'(input: SendSettings): Promise<SendSettings>;
+  /** 检测 RPA 能否找到客户端窗口，不会发送任何消息。 */
+  'settings.checkRpa'(input: { rpa?: RpaSettings }): Promise<string>;
 
   'log.list'(query: LogQuery): Promise<LogEntry[]>;
 }
