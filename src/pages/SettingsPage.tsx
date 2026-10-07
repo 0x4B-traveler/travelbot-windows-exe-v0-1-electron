@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { GroupMessageConfigView } from '../domain/business';
 import { call } from '../api';
-import { RPA_CLIENT_LABELS, SEND_MODE_LABELS, type RpaClient, type RpaGuard, type RpaSettings, type SendMode, type SendSettings } from '../domain/ops';
+import { DEFAULT_AGENT_PORT, POOL_ROLE_LABELS, RPA_CLIENT_LABELS, SEND_MODE_LABELS, type AccountStatus, type PoolRole, type PoolSettings, type RpaAccount, type RpaClient, type RpaGuard, type RpaSettings, type SendMode, type SendSettings } from '../domain/ops';
 import { Card, Field, Notice, Tabs, useAction } from '../ui';
 
 export type ConnectionState = 'checking' | 'unauthorized' | 'authorizing' | 'authorized' | 'error';
@@ -19,19 +19,26 @@ function SendModeCard() {
   const [saved, setSaved] = useState<SendSettings | null>(null);
   const [mode, setMode] = useState<SendMode>('api');
   const [rpa, setRpa] = useState<RpaSettings | null>(null);
+  const [pool, setPool] = useState<PoolSettings | null>(null);
+  const [agent, setAgent] = useState<Awaited<ReturnType<typeof loadAgent>> | null>(null);
   const { busy, notice, run } = useAction();
-  useEffect(() => { void call('settings.getSend').then(value => { setSaved(value); setMode(value.mode); setRpa(value.rpa); }); }, []);
-  if (!saved || !rpa) return <Card title="客户群发送方式"><p className="hint">正在加载…</p></Card>;
+  const apply = (value: SendSettings) => { setSaved(value); setMode(value.mode); setRpa(value.rpa); setPool(value.pool); };
+  useEffect(() => { void call('settings.getSend').then(apply); void loadAgent().then(setAgent); }, []);
+  if (!saved || !rpa || !pool) return <Card title="客户群发送方式"><p className="hint">正在加载…</p></Card>;
   const patch = (next: Partial<RpaSettings>) => setRpa({ ...rpa, ...next });
   const guard = rpa.guard;
   const patchGuard = (next: Partial<RpaGuard>) => setRpa({ ...rpa, guard: { ...guard, ...next } });
   const num = (key: keyof RpaGuard) => (event: React.ChangeEvent<HTMLInputElement>) => patchGuard({ [key]: Number(event.target.value) } as Partial<RpaGuard>);
-  const dirty = mode !== saved.mode || JSON.stringify(rpa) !== JSON.stringify(saved.rpa);
+  const dirty = mode !== saved.mode || JSON.stringify(rpa) !== JSON.stringify(saved.rpa) || JSON.stringify(pool) !== JSON.stringify(saved.pool);
   const save = () => void run(async () => {
-    const next = await call('settings.saveSend', { mode, rpa });
-    setSaved(next); setMode(next.mode); setRpa(next.rpa);
-    return next.mode === 'rpa' ? `已切换为 RPA：客户群将通过本机${RPA_CLIENT_LABELS[next.rpa.client]}发送` : '已切换为企业微信接口发送';
+    const next = await call('settings.saveSend', { mode, rpa, pool });
+    apply(next);
+    // 执行端的局域网服务是异步启动的，稍等再读状态
+    window.setTimeout(() => void loadAgent().then(setAgent), 800);
+    if (next.mode !== 'rpa') return '已切换为企业微信接口发送';
+    return next.pool.role === 'agent' ? '已保存：本机作为执行端，等待主控发来的发送指令' : `已保存：客户群按账号池发送（${next.pool.accounts.filter(account => account.enabled).length} 个可用账号）`;
   });
+  const isAgent = pool.role === 'agent';
   const label = RPA_CLIENT_LABELS[rpa.client];
   return <>
     <Card title="客户群发送方式" extra={saved.mode !== mode ? <span className="hint">未保存</span> : undefined}>
@@ -39,7 +46,17 @@ function SendModeCard() {
       {mode === 'api'
         ? <p className="hint">通过企业微信“客户群群发”接口创建任务，群主在企业微信里确认后发出。需要配置企业 ID、Secret，并把本机公网 IP 加入企业可信 IP。机器人群不受影响，始终由机器人直接发送。</p>
         : <>
-          <p className="hint">程序会自动操作本机已登录的{label}：切到前台 → 搜索群名 → 进入群聊 → 粘贴内容 → 发送。不需要接口权限和可信 IP，群可以在“群管理”里按群名手动添加。发送时会占用屏幕和剪贴板几秒钟，电脑锁屏时无法发送；群名请保持唯一，程序会进入搜索结果的第一个。</p>
+          <p className="hint">程序会自动操作已登录的{label}：切到前台 → 搜索群名 → 进入群聊 → 粘贴内容 → 发送。不需要接口权限和可信 IP，群可以在“群管理”里按群名手动添加。发送时会占用屏幕和剪贴板几秒钟，电脑锁屏时无法发送；群名请保持唯一，程序会进入搜索结果的第一个。</p>
+          <Field label="本机角色" group hint="一个企业微信账号只能稳定登录一台电脑，多个账号就用多台电脑：一台主控管内容、任务和群，其他电脑做执行端，各自用自己的账号发。"><div className="radio-row">{(Object.keys(POOL_ROLE_LABELS) as PoolRole[]).map(value => <label key={value} className="toggle-row"><input type="radio" checked={pool.role === value} onChange={() => setPool({ ...pool, role: value })} />{POOL_ROLE_LABELS[value]}{value === 'master' ? '（管内容、任务和群）' : '（只接收主控的发送指令）'}</label>)}</div></Field>
+          {isAgent && <div className="preview-box">
+            <p><strong>在主控的“账号池”里添加本机时填写：</strong></p>
+            <p>IP 地址：<span className="mono">{agent?.addresses.join(' / ') || '未获取到局域网地址'}</span></p>
+            <div className="form-grid">
+              <Field label="端口"><input type="number" min={1025} max={65535} value={pool.agentPort} onChange={event => setPool({ ...pool, agentPort: Number(event.target.value) || DEFAULT_AGENT_PORT })} /></Field>
+              <Field label="配对口令" hint="保存后自动生成，主控需要填同样的口令"><input value={pool.agentToken} onChange={event => setPool({ ...pool, agentToken: event.target.value })} placeholder="保存后自动生成" /></Field>
+            </div>
+            <p className="hint">{saved.pool.role !== 'agent' ? '保存后开始监听。' : agent?.listening ? `正在监听端口 ${agent.port}，等待主控的指令。第一次启动时 Windows 防火墙可能会询问，请选择“允许”。` : `没有在监听：${agent?.error || '请保存后重试'}`}本机的客户端和下面的防封设置只对本机账号生效。</p>
+          </div>}
           <Field label="操作哪个客户端" group><div className="radio-row">{(Object.keys(RPA_CLIENT_LABELS) as RpaClient[]).map(value => <label key={value} className="toggle-row"><input type="radio" checked={rpa.client === value} onChange={() => patch({ client: value })} />{RPA_CLIENT_LABELS[value]}</label>)}</div></Field>
           <Field label="发送方式" group><div className="radio-row">
             <label className="toggle-row"><input type="radio" checked={rpa.autoSend} onChange={() => patch({ autoSend: true })} />自动发送</label>
@@ -69,14 +86,61 @@ function SendModeCard() {
             </Field>
           </div>
           <label className="toggle-row"><input type="checkbox" checked={guard.varyOpening} onChange={event => patchGuard({ varyOpening: event.target.checked })} />开头随机加一句问候（如“大家早上好！”），让多个群收到的文字不完全一样</label>
+          {!isAgent && <AccountPool pool={pool} onChange={setPool} />}
         </>}
       <Notice notice={notice} />
       <div className="actions">
-        {mode === 'rpa' && <button className="secondary" disabled={busy} onClick={() => void run(() => call('settings.checkRpa', { rpa }))}>检测客户端</button>}
+        {mode === 'rpa' && <button className="secondary" disabled={busy} onClick={() => void run(() => call('settings.checkRpa', { rpa }))}>检测本机客户端</button>}
         <button className="primary" disabled={busy || !dirty} onClick={save}>{saved.mode !== mode ? `切换为${SEND_MODE_LABELS[mode]}` : '保存'}</button>
       </div>
     </Card>
     {mode === 'api' && <GroupMessageConfigCard />}
+  </>;
+}
+
+const loadAgent = () => call('settings.agentInfo');
+
+/** 账号池（主控）：本机账号 + 局域网里的执行端。群在“群管理”里绑定账号，没绑定的用第一个可用账号。 */
+function AccountPool({ pool, onChange }: { pool: PoolSettings; onChange: (next: PoolSettings) => void }) {
+  const [draft, setDraft] = useState({ name: '', host: '', port: DEFAULT_AGENT_PORT, token: '' });
+  const [status, setStatus] = useState<Record<string, AccountStatus | 'checking'>>({});
+  const update = (id: string, patch: Partial<RpaAccount>) => onChange({ ...pool, accounts: pool.accounts.map(account => account.id === id ? { ...account, ...patch } : account) });
+  const test = async (account: RpaAccount) => {
+    setStatus(current => ({ ...current, [account.id]: 'checking' }));
+    const result = await call('settings.checkAccount', { account }).catch((error: unknown): AccountStatus => ({ ok: false, detail: error instanceof Error ? error.message : String(error) }));
+    setStatus(current => ({ ...current, [account.id]: result }));
+  };
+  const add = () => {
+    const id = `acc-${Date.now().toString(36)}`;
+    onChange({ ...pool, accounts: [...pool.accounts, { id, name: draft.name.trim() || `账号 ${pool.accounts.length + 1}`, kind: 'remote', host: draft.host.trim(), port: draft.port || DEFAULT_AGENT_PORT, token: draft.token.trim(), enabled: true }] });
+    setDraft({ name: '', host: '', port: DEFAULT_AGENT_PORT, token: '' });
+  };
+  return <>
+    <h4 className="sub-title">账号池</h4>
+    <p className="hint">每个账号对应一台登录了企业微信的电脑。其他电脑装好本程序、在“本机角色”选执行端，再把它显示的 IP、端口和口令填到这里。防封限频由每台执行端按自己的账号计算。</p>
+    <table className="ops-table">
+      <thead><tr><th>账号</th><th>位置</th><th>状态</th><th></th></tr></thead>
+      <tbody>{pool.accounts.map(account => {
+        const state = status[account.id];
+        return <tr key={account.id}>
+          <td><input value={account.name} onChange={event => update(account.id, { name: event.target.value })} /></td>
+          <td className="mono">{account.kind === 'local' ? '本机' : `${account.host}:${account.port}`}</td>
+          <td>{state === 'checking' ? '检测中…' : state ? <span className={state.ok ? '' : 'danger-text'}>{state.detail}{state.sentToday !== undefined ? `（今日已发 ${state.sentToday}）` : ''}</span> : account.enabled ? '启用' : '停用'}</td>
+          <td className="actions-cell">
+            <button className="link" onClick={() => void test(account)}>测试</button>
+            <button className="link" onClick={() => update(account.id, { enabled: !account.enabled })}>{account.enabled ? '停用' : '启用'}</button>
+            {account.kind === 'remote' && <button className="link" onClick={() => onChange({ ...pool, accounts: pool.accounts.filter(item => item.id !== account.id) })}>删除</button>}
+          </td>
+        </tr>;
+      })}</tbody>
+    </table>
+    <div className="form-grid">
+      <Field label="新账号名称"><input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} placeholder="如：小王的企业微信" /></Field>
+      <Field label="执行端 IP"><input value={draft.host} onChange={event => setDraft({ ...draft, host: event.target.value })} placeholder="如 192.168.1.23" /></Field>
+      <Field label="端口"><input type="number" value={draft.port} onChange={event => setDraft({ ...draft, port: Number(event.target.value) })} /></Field>
+      <Field label="配对口令"><input value={draft.token} onChange={event => setDraft({ ...draft, token: event.target.value })} /></Field>
+    </div>
+    <div className="inline-actions"><button className="secondary" disabled={!draft.host.trim() || !draft.token.trim()} onClick={add}>添加到账号池</button><span className="hint">添加后点“保存”生效</span></div>
   </>;
 }
 

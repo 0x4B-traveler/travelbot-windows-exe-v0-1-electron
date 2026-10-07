@@ -124,6 +124,8 @@ export type OpsGroup = {
   available: boolean;
   lastSentAt?: string;
   todaySent: number;
+  /** RPA 账号池里负责这个群的账号，留空用第一个可用账号。 */
+  accountId?: string;
   updatedAt: string;
 };
 
@@ -179,9 +181,41 @@ export type RpaGuard = {
   /** 每次最多附几张路线素材里的攻略图，0 表示不发图。 */
   maxImages: number;
 };
-export type SendSettings = { mode: SendMode; rpa: RpaSettings };
+// ───────── RPA 账号池（多台电脑，一台一个账号） ─────────
+/** master：主控，管内容、任务、群，按群把发送指令分给账号；agent：执行端，在局域网里接收主控的指令，用本机客户端发。 */
+export type PoolRole = 'master' | 'agent';
+export const POOL_ROLE_LABELS: Record<PoolRole, string> = { master: '主控', agent: '执行端' };
+export const LOCAL_ACCOUNT_ID = 'local';
+export type RpaAccount = {
+  id: string;
+  name: string;
+  /** local：本机客户端；remote：局域网里另一台电脑上的执行端。 */
+  kind: 'local' | 'remote';
+  host: string;
+  port: number;
+  token: string;
+  enabled: boolean;
+};
+export type PoolSettings = {
+  role: PoolRole;
+  accounts: RpaAccount[];
+  /** 本机作为执行端时监听的端口和配对口令。 */
+  agentPort: number;
+  agentToken: string;
+};
+export const DEFAULT_AGENT_PORT = 47820;
+export const DEFAULT_POOL_SETTINGS: PoolSettings = { role: 'master', accounts: [{ id: LOCAL_ACCOUNT_ID, name: '本机', kind: 'local', host: '', port: 0, token: '', enabled: true }], agentPort: DEFAULT_AGENT_PORT, agentToken: '' };
+/** 群实际由哪个账号发：绑定的账号可用就用它，否则用第一个可用账号。 */
+export function resolveAccount(pool: PoolSettings, accountId?: string): RpaAccount | null {
+  const enabled = pool.accounts.filter(account => account.enabled);
+  return enabled.find(account => account.id === accountId) ?? (accountId && pool.accounts.some(account => account.id === accountId) ? null : enabled[0] ?? null);
+}
+/** 账号状态（主控测试连接、执行端自检时返回）。 */
+export type AccountStatus = { ok: boolean; detail: string; client?: string; sentToday?: number; pausedUntil?: string };
+
+export type SendSettings = { mode: SendMode; rpa: RpaSettings; pool: PoolSettings };
 export const DEFAULT_RPA_GUARD: RpaGuard = { groupGapMinSec: 20, groupGapMaxSec: 60, activeStart: '07:30', activeEnd: '21:30', maxPerHour: 20, maxPerDay: 80, maxPerGroupPerDay: 3, pauseAfterFailures: 3, pauseMinutes: 30, varyOpening: false, maxImages: 3 };
-export const DEFAULT_SEND_SETTINGS: SendSettings = { mode: 'api', rpa: { client: 'wecom', autoSend: true, sendKey: 'enter', searchHotkey: '^f', stepDelayMs: 800, clientPath: '', guard: DEFAULT_RPA_GUARD } };
+export const DEFAULT_SEND_SETTINGS: SendSettings = { mode: 'api', rpa: { client: 'wecom', autoSend: true, sendKey: 'enter', searchHotkey: '^f', stepDelayMs: 800, clientPath: '', guard: DEFAULT_RPA_GUARD }, pool: DEFAULT_POOL_SETTINGS };
 /** 客户群在当前发送方式下的发送能力。 */
 export function groupCapabilities(channel: GroupChannel, mode: SendMode): GroupCapabilities {
   return channel === 'customer' && mode === 'rpa' ? { text: true, image: true, needsConfirm: false } : GROUP_CAPABILITIES[channel];
@@ -200,6 +234,8 @@ export type LogEntry = {
   taskId?: string;
   groupName?: string;
   attempt?: number;
+  /** RPA 发送用的账号 id。 */
+  account?: string;
   detail?: string;
 };
 export type LogQuery = { status?: LogStatus; module?: LogModule; taskId?: string; limit?: number };
@@ -256,10 +292,10 @@ export interface OpsApi {
 
   'group.list'(): Promise<OpsGroup[]>;
   'group.refresh'(): Promise<RefreshResult>;
-  'group.update'(input: { id: string; enabled?: boolean; matchMode?: GroupMatchMode }): Promise<OpsGroup>;
+  'group.update'(input: { id: string; enabled?: boolean; matchMode?: GroupMatchMode; accountId?: string }): Promise<OpsGroup>;
   'group.testSend'(input: { id: string; text: string }): Promise<string>;
   /** 手动按群名添加客户群（RPA 模式用，不需要企业微信接口），已存在的同名群会跳过。 */
-  'group.add'(input: { names: string[] }): Promise<OpsGroup[]>;
+  'group.add'(input: { names: string[]; accountId?: string }): Promise<OpsGroup[]>;
   /** 只能删除手动添加的群。 */
   'group.delete'(input: { id: string }): Promise<void>;
 
@@ -267,6 +303,10 @@ export interface OpsApi {
   'settings.saveSend'(input: SendSettings): Promise<SendSettings>;
   /** 检测 RPA 能否找到客户端窗口，不会发送任何消息。 */
   'settings.checkRpa'(input: { rpa?: RpaSettings }): Promise<string>;
+  /** 测试连接账号池里的一个账号（本机检测客户端，远程请求执行端）。 */
+  'settings.checkAccount'(input: { account: RpaAccount }): Promise<AccountStatus>;
+  /** 本机的局域网地址，执行端把它填到主控里。 */
+  'settings.agentInfo'(): Promise<{ addresses: string[]; port: number; token: string; listening: boolean; error?: string }>;
 
   'log.list'(query: LogQuery): Promise<LogEntry[]>;
 }

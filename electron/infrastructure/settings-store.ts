@@ -10,7 +10,11 @@ export class JsonSendSettingsStore implements SendSettingsStore {
   get(): SendSettings {
     try {
       const raw = JSON.parse(readFileSync(this.path, 'utf8'));
-      return { mode: raw?.mode === 'rpa' ? 'rpa' : 'api', rpa: { ...DEFAULT_SEND_SETTINGS.rpa, ...(raw?.rpa ?? {}), guard: { ...DEFAULT_SEND_SETTINGS.rpa.guard, ...(raw?.rpa?.guard ?? {}) } } };
+      return {
+        mode: raw?.mode === 'rpa' ? 'rpa' : 'api',
+        rpa: { ...DEFAULT_SEND_SETTINGS.rpa, ...(raw?.rpa ?? {}), guard: { ...DEFAULT_SEND_SETTINGS.rpa.guard, ...(raw?.rpa?.guard ?? {}) } },
+        pool: { ...DEFAULT_SEND_SETTINGS.pool, ...(raw?.pool ?? {}), accounts: Array.isArray(raw?.pool?.accounts) && raw.pool.accounts.length ? raw.pool.accounts : DEFAULT_SEND_SETTINGS.pool.accounts },
+      };
     } catch { return structuredClone(DEFAULT_SEND_SETTINGS); }
   }
 

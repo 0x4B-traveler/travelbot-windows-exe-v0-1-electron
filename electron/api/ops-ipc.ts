@@ -46,12 +46,14 @@ export function registerOpsApi(services: OpsServices) {
     'group.refresh': () => groups.refresh(),
     'group.update': input => groups.update(input),
     'group.testSend': ({ id, text }) => groups.testSend(id, String(text ?? '')),
-    'group.add': ({ names }) => groups.add(names),
+    'group.add': ({ names, accountId }) => groups.add(names, accountId),
     'group.delete': ({ id }) => groups.delete(id),
 
     'settings.getSend': () => sendSettings.get(),
     'settings.saveSend': input => sendSettings.save(input),
     'settings.checkRpa': ({ rpa }) => sendSettings.checkRpa(rpa),
+    'settings.checkAccount': ({ account }) => sendSettings.checkAccount(account),
+    'settings.agentInfo': () => sendSettings.agent(),
 
     'log.list': query => logs.list(query ?? {}),
   };

@@ -6,10 +6,12 @@ import {
   type GenerateInput, type GroupMatchMode, type ImportResult, type LogEntry, type LogQuery, type Material, type MaterialFacets,
   type MaterialInput, type MaterialKind, type MaterialQuery, type OpsGroup, type OpsTask, type RefreshResult, type Route, type RouteInput,
   type RouteQuery, type TaskInput, type TaskRepeat, type TaskRun, type TaskStatus,
-  DEFAULT_SEND_SETTINGS, MANUAL_CHAT_PREFIX, RPA_CLIENT_LABELS, isManualGroup, type RpaGuard, type RpaSettings, type SendSettings,
+  DEFAULT_AGENT_PORT, DEFAULT_SEND_SETTINGS, LOCAL_ACCOUNT_ID, MANUAL_CHAT_PREFIX, RPA_CLIENT_LABELS, isManualGroup, resolveAccount,
+  type AccountStatus, type PoolSettings, type RpaAccount, type RpaGuard, type RpaSettings, type SendSettings,
 } from '../../src/domain/ops';
 import { ContentRepository, GroupRepository, LogRepository, MaterialRepository, RouteRepository, TaskRepository, type StoredTask } from '../infrastructure/repositories';
-import type { BotGateway, ContentGenerator, CustomerGroupGateway, DesktopRpaGateway, FilePicker, FileStore, SendSettingsStore, WeatherGateway } from './ports';
+import type { BotGateway, ContentGenerator, CustomerGroupGateway, FilePicker, FileStore, RpaAccountClient, SendSettingsStore, WeatherGateway } from './ports';
+import { nextActiveStart, type RpaExecutor } from './rpa-executor';
 
 // Application 层：每个服务只管自己模块的业务规则，跨模块协作通过调用其他服务，不直接碰别人的表或企业微信。
 
@@ -26,7 +28,7 @@ export class LogService {
   write(entry: Omit<LogEntry, 'id' | 'time'>) { try { this.repo.add(entry); } catch { /* 日志失败不能影响业务 */ } }
   list(query: LogQuery) { return this.repo.list(query); }
   sentToday(groupName: string) { return this.repo.countSentSince(groupName, startOfLocalDay(new Date()).toISOString()); }
-  rpaSentSince(since: Date, groupName?: string) { return this.repo.countRpaSentSince(since.toISOString(), groupName); }
+  rpaSentSince(account: string, since: Date, groupName?: string) { return this.repo.countRpaSentSince(account, since.toISOString(), groupName); }
   /** 只保留最近 60 天的日志。 */
   prune() { this.repo.prune(new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString()); }
 }
@@ -234,31 +236,74 @@ export class ContentService {
 }
 
 // ───────── 发送方式（设置） ─────────
+export type AgentInfo = { addresses: string[]; port: number; token: string; listening: boolean; error?: string };
+
 export class SendSettingsService {
-  constructor(private readonly store: SendSettingsStore, private readonly rpa: DesktopRpaGateway, private readonly logs: LogService) {}
+  constructor(
+    private readonly store: SendSettingsStore,
+    private readonly local: RpaExecutor,
+    private readonly accounts: (account: RpaAccount) => RpaAccountClient,
+    private readonly agentInfo: () => AgentInfo,
+    private readonly logs: LogService,
+    /** 保存后回调：主进程据此启停执行端的局域网服务。 */
+    private readonly onChange: (settings: SendSettings) => void,
+  ) {}
 
   get(): SendSettings { return this.store.get(); }
 
   save(input: SendSettings): SendSettings {
-    const next: SendSettings = { mode: input?.mode === 'rpa' ? 'rpa' : 'api', rpa: normalizeRpa(input?.rpa) };
     const previous = this.store.get();
+    const next: SendSettings = { mode: input?.mode === 'rpa' ? 'rpa' : 'api', rpa: normalizeRpa(input?.rpa), pool: normalizePool(input?.pool, previous.pool) };
     this.store.save(next);
     if (previous.mode !== next.mode) this.logs.write({ module: 'System', action: '切换发送方式', status: 'info', message: next.mode === 'rpa' ? `客户群改为 RPA 发送（${RPA_CLIENT_LABELS[next.rpa.client]}桌面客户端）` : '客户群改为企业微信接口发送' });
+    if (previous.pool.role !== next.pool.role) this.logs.write({ module: 'System', action: '切换本机角色', status: 'info', message: next.pool.role === 'agent' ? `本机改为执行端，监听端口 ${next.pool.agentPort}` : '本机改为主控' });
+    this.onChange(next);
     return next;
   }
 
   async checkRpa(override?: RpaSettings): Promise<string> {
-    const settings = override ? normalizeRpa(override) : this.store.get().rpa;
-    try {
-      const detail = await this.rpa.check(settings);
-      this.logs.write({ module: 'RPA', action: '检测客户端', status: 'ok', message: detail });
-      return detail;
-    } catch (error: any) {
-      const message = error?.message || String(error);
-      this.logs.write({ module: 'RPA', action: '检测客户端', status: 'fail', message });
-      throw new OpsError(message);
-    }
+    const status = await this.local.check(undefined, override ? normalizeRpa(override) : undefined);
+    this.logs.write({ module: 'RPA', action: '检测客户端', status: status.ok ? 'ok' : 'fail', message: status.detail });
+    if (!status.ok) throw new OpsError(status.detail);
+    return status.detail;
   }
+
+  async checkAccount(input: RpaAccount): Promise<AccountStatus> {
+    const account = normalizeAccount(input);
+    if (account.kind === 'remote' && (!account.host || !account.token)) fail('请填写执行端的 IP 地址和配对口令');
+    const status = await this.accounts(account).check().catch((error: any): AccountStatus => ({ ok: false, detail: error?.message || String(error) }));
+    this.logs.write({ module: 'RPA', action: '测试账号', status: status.ok ? 'ok' : 'fail', message: `${account.name}：${status.detail}` });
+    return status;
+  }
+
+  agent(): AgentInfo { return this.agentInfo(); }
+}
+
+function normalizeAccount(input: Partial<RpaAccount>): RpaAccount {
+  const port = Number(input?.port);
+  const isLocal = input?.id === LOCAL_ACCOUNT_ID;
+  return {
+    id: isLocal ? LOCAL_ACCOUNT_ID : String(input?.id || randomUUID()),
+    name: String(input?.name ?? '').trim() || (isLocal ? '本机' : '未命名账号'),
+    kind: isLocal ? 'local' : 'remote',
+    host: isLocal ? '' : String(input?.host ?? '').trim(),
+    port: isLocal ? 0 : Number.isInteger(port) && port > 0 && port < 65536 ? port : DEFAULT_AGENT_PORT,
+    token: isLocal ? '' : String(input?.token ?? '').trim(),
+    enabled: input?.enabled ?? true,
+  };
+}
+
+function normalizePool(input: Partial<PoolSettings> | undefined, previous: PoolSettings): PoolSettings {
+  const accounts = (Array.isArray(input?.accounts) ? input!.accounts : previous.accounts).map(normalizeAccount);
+  // 本机账号始终存在（可以停用），排在第一个
+  const local = accounts.find(account => account.id === LOCAL_ACCOUNT_ID) ?? normalizeAccount({ id: LOCAL_ACCOUNT_ID });
+  const port = Number(input?.agentPort);
+  return {
+    role: input?.role === 'agent' ? 'agent' : 'master',
+    accounts: [local, ...accounts.filter(account => account.id !== LOCAL_ACCOUNT_ID)],
+    agentPort: Number.isInteger(port) && port > 1024 && port < 65536 ? port : previous.agentPort || DEFAULT_AGENT_PORT,
+    agentToken: String(input?.agentToken ?? '').trim() || previous.agentToken || randomUUID().replace(/-/g, '').slice(0, 16),
+  };
 }
 
 function normalizeRpa(input?: Partial<RpaSettings>): RpaSettings {
@@ -335,14 +380,16 @@ export class GroupService {
     return { added, updated, missing, warnings };
   }
 
-  update(input: { id: string; enabled?: boolean; matchMode?: GroupMatchMode }): OpsGroup {
+  update(input: { id: string; enabled?: boolean; matchMode?: GroupMatchMode; accountId?: string }): OpsGroup {
     const group = this.repo.get(input.id) ?? fail('群不存在或已被删除');
-    this.repo.upsert({ ...group, enabled: input.enabled ?? group.enabled, matchMode: input.matchMode === 'name' || input.matchMode === 'id' ? input.matchMode : group.matchMode });
+    const accountId = input.accountId === undefined ? group.accountId : (input.accountId || undefined);
+    if (accountId && !this.sendSettings().pool.accounts.some(account => account.id === accountId)) fail('账号不存在，请先在“设置 → 账号池”里添加');
+    this.repo.upsert({ ...group, enabled: input.enabled ?? group.enabled, matchMode: input.matchMode === 'name' || input.matchMode === 'id' ? input.matchMode : group.matchMode, accountId });
     return this.get(group.id);
   }
 
   /** 手动添加客户群：RPA 按群名搜索发送，不需要接口。按群名匹配，以后接口能拉到同名群时会自动接上。 */
-  add(names: string[]): OpsGroup[] {
+  add(names: string[], accountId?: string): OpsGroup[] {
     const wanted = cleanList(Array.isArray(names) ? names.map(String) : []);
     if (!wanted.length) fail('请填写群名称');
     const existing = new Set(this.repo.list().filter(group => group.channel === 'customer').map(group => group.name));
@@ -350,7 +397,7 @@ export class GroupService {
     for (const name of wanted) {
       if (existing.has(name)) continue;
       const id = randomUUID();
-      this.repo.upsert({ id, chatId: `${MANUAL_CHAT_PREFIX}${id}`, name, channel: 'customer', owner: '', memberCount: 0, enabled: true, matchMode: 'name', available: true });
+      this.repo.upsert({ id, chatId: `${MANUAL_CHAT_PREFIX}${id}`, name, channel: 'customer', owner: '', memberCount: 0, enabled: true, matchMode: 'name', available: true, accountId: accountId || undefined });
       existing.add(name);
       added.push(this.get(id));
     }
@@ -377,42 +424,24 @@ export class GroupService {
 // ───────── 分发适配（怎么发） ─────────
 export type SendResult = { ok: boolean; detail: string };
 
-/** 防封规则拦下的发送：不算 RPA 故障，不触发熔断。 */
-class GuardBlocked extends Error {}
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const randomBetween = (min: number, max: number) => min + Math.random() * Math.max(0, max - min);
-function minutesOf(hhmm: string): number | null {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
-  if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return null;
-  return Number(match[1]) * 60 + Number(match[2]);
-}
-/** 不在发送时段时返回下一个时段开始的时间，在时段内返回 null。支持跨零点（如 22:00–02:00）。 */
-export function nextActiveStart(guard: RpaGuard, now: Date): Date | null {
-  const start = minutesOf(guard.activeStart); const end = minutesOf(guard.activeEnd);
-  if (start === null || end === null || start === end) return null;
-  const current = now.getHours() * 60 + now.getMinutes();
-  const inside = start < end ? current >= start && current < end : current >= start || current < end;
-  if (inside) return null;
-  const next = new Date(now); next.setHours(Math.floor(start / 60), start % 60, 0, 0);
-  if (next <= now) next.setDate(next.getDate() + 1);
-  return next;
-}
-const GREETINGS = { morning: '早上好', noon: '中午好', afternoon: '下午好', evening: '晚上好' };
-/** 开头随机加一句问候，让不同群收到的文字略有不同。 */
-function varyOpening(text: string, now: Date): string {
-  const hour = now.getHours();
-  const word = hour < 11 ? GREETINGS.morning : hour < 14 ? GREETINGS.noon : hour < 18 ? GREETINGS.afternoon : GREETINGS.evening;
-  const forms = [`${word}～`, `大家${word}！`, `各位${word}`, `${word}呀`, `亲们${word}～`, `Hi 各位，${word}`];
-  return `${forms[Math.floor(Math.random() * forms.length)]}\n${text}`;
-}
-
 export class DistributionService {
-  /** RPA 熔断状态：连续失败次数、暂停到什么时候、上一次发出的时间（控制群间隔）。 */
-  private rpaFailures = 0;
-  private rpaPausedUntil = 0;
-  private rpaLastSentAt = 0;
+  constructor(
+    private readonly bot: BotGateway,
+    private readonly customer: CustomerGroupGateway,
+    /** 账号池里每个账号的发送入口：本机账号是 RpaExecutor，远程账号是执行端的局域网客户端。 */
+    private readonly accounts: (account: RpaAccount) => RpaAccountClient,
+    private readonly sendSettings: () => SendSettings,
+    private readonly logs: LogService,
+    private readonly onSent: (groupId: string) => void,
+  ) {}
 
-  constructor(private readonly bot: BotGateway, private readonly customer: CustomerGroupGateway, private readonly rpa: DesktopRpaGateway, private readonly sendSettings: () => SendSettings, private readonly logs: LogService, private readonly onSent: (groupId: string) => void) {}
+  /** 群由哪个账号发；找不到时给出原因。 */
+  private accountFor(group: OpsGroup): { account: RpaAccount } | { error: string } {
+    const pool = this.sendSettings().pool;
+    const account = resolveAccount(pool, group.accountId);
+    if (account) return { account };
+    return { error: group.accountId && pool.accounts.some(item => item.id === group.accountId) ? '绑定的发送账号已停用，请在群管理换一个账号' : '账号池里没有可用的发送账号（设置 → 账号池）' };
+  }
 
   /** 预演：做发送前的全部检查，客户群还会用只读接口确认凭证、可信 IP 和群是否还在，但不创建群发任务。 */
   async dryRun(groups: OpsGroup[], context: { taskId?: string; imageCount?: number }): Promise<DryRunGroup[]> {
@@ -420,7 +449,6 @@ export class DistributionService {
     let botChats: Set<string> | null | Error = null;
     const customerChats = new Map<string, Set<string> | Error>();
     const settings = this.sendSettings();
-    let rpaCheck: string | Error | null = null;
     for (const group of groups) {
       const result = (ok: boolean, detail: string) => {
         results.push({ name: group.name, channel: group.channel, ok, detail });
@@ -436,15 +464,12 @@ export class DistributionService {
         continue;
       }
       if (settings.mode === 'rpa') {
-        const label = RPA_CLIENT_LABELS[settings.rpa.client];
-        const blocked = this.guardBlock(group, new Date());
-        if (blocked) { result(false, `防封规则：${blocked}`); continue; }
-        if (rpaCheck === null) rpaCheck = await this.rpa.check().catch(error => (error instanceof Error ? error : new Error(String(error))));
-        if (rpaCheck instanceof Error) result(false, rpaCheck.message);
-        else {
-          const images = Math.min(context.imageCount ?? 0, settings.rpa.guard.maxImages);
-          result(true, `${label}客户端正常，正式执行时会在${label}里搜索“${group.name}”，${images ? `发文字和 ${images} 张图` : '发文字'}并${settings.rpa.autoSend ? '自动发送' : '粘贴到输入框，等人工按发送'}`);
-        }
+        const picked = this.accountFor(group);
+        if ('error' in picked) { result(false, picked.error); continue; }
+        const status = await this.accounts(picked.account).check(group.name).catch((error: any): AccountStatus => ({ ok: false, detail: error?.message || String(error) }));
+        if (!status.ok) { result(false, `账号“${picked.account.name}”：${status.detail}`); continue; }
+        const images = Math.min(context.imageCount ?? 0, settings.rpa.guard.maxImages);
+        result(true, `账号“${picked.account.name}”正常，正式执行时会在${status.client ?? '客户端'}里搜索“${group.name}”并发送${images ? `文字和 ${images} 张图` : '文字'}`);
         continue;
       }
       if (isManualGroup(group)) { result(false, '手动添加的群只能用 RPA 发送，请在设置里切换到“桌面客户端（RPA）”'); continue; }
@@ -460,52 +485,10 @@ export class DistributionService {
     return results;
   }
 
-  /** RPA 模式下当前不能发（时段外或熔断暂停中）时，返回可以重新尝试的时间，供运营任务顺延。 */
+  /** RPA 模式下当前不在发送时段时，返回下一个时段开始的时间，供运营任务顺延（时段以主控的防封设置为准）。 */
   rpaDeferUntil(now: Date): Date | null {
     const settings = this.sendSettings();
-    if (settings.mode !== 'rpa') return null;
-    if (this.rpaPausedUntil > now.getTime()) return new Date(this.rpaPausedUntil);
-    return nextActiveStart(settings.rpa.guard, now);
-  }
-
-  /** 防封规则检查：返回拦截原因，可以发时返回 null。 */
-  private guardBlock(group: OpsGroup, now: Date): string | null {
-    const guard = this.sendSettings().rpa.guard;
-    if (this.rpaPausedUntil > now.getTime()) return `RPA 连续失败后暂停中，${fmt(new Date(this.rpaPausedUntil))} 后恢复`;
-    if (nextActiveStart(guard, now)) return `不在发送时段（${guard.activeStart}–${guard.activeEnd}）`;
-    if (guard.maxPerHour > 0 && this.logs.rpaSentSince(new Date(now.getTime() - 3600 * 1000)) >= guard.maxPerHour) return `最近一小时已发 ${guard.maxPerHour} 次，达到上限`;
-    const today = startOfLocalDay(now);
-    if (guard.maxPerDay > 0 && this.logs.rpaSentSince(today) >= guard.maxPerDay) return `今天已发 ${guard.maxPerDay} 次，达到每日上限`;
-    if (guard.maxPerGroupPerDay > 0 && this.logs.rpaSentSince(today, group.name) >= guard.maxPerGroupPerDay) return `这个群今天已发 ${guard.maxPerGroupPerDay} 次，达到单群上限`;
-    return null;
-  }
-
-  private async sendViaRpa(group: OpsGroup, text: string, images: string[], context: { taskId?: string }): Promise<{ sent: boolean; images: number }> {
-    const settings = this.sendSettings(); const guard = settings.rpa.guard;
-    const blocked = this.guardBlock(group, new Date());
-    if (blocked) throw new GuardBlocked(`防封规则：${blocked}，本次未发送`);
-    // 运营任务连发多个群时，群与群之间随机停一会儿，像人一样一个个发
-    if (context.taskId && this.rpaLastSentAt) {
-      const gapMs = randomBetween(guard.groupGapMinSec, Math.max(guard.groupGapMinSec, guard.groupGapMaxSec)) * 1000;
-      const wait = this.rpaLastSentAt + gapMs - Date.now();
-      if (wait > 0) await sleep(wait);
-    }
-    const attachments = images.slice(0, Math.max(0, guard.maxImages));
-    try {
-      const result = await this.rpa.sendText(group.name, guard.varyOpening ? varyOpening(text, new Date()) : text, attachments);
-      this.rpaFailures = 0;
-      return { sent: result.sent, images: attachments.length };
-    } catch (error) {
-      this.rpaFailures += 1;
-      if (guard.pauseAfterFailures > 0 && this.rpaFailures >= guard.pauseAfterFailures) {
-        this.rpaPausedUntil = Date.now() + Math.max(1, guard.pauseMinutes) * 60 * 1000;
-        this.rpaFailures = 0;
-        this.logs.write({ module: 'RPA', action: '熔断暂停', status: 'fail', taskId: context.taskId, message: `连续失败 ${guard.pauseAfterFailures} 次，RPA 暂停到 ${fmt(new Date(this.rpaPausedUntil))}，请检查客户端是否掉线或弹出了验证` });
-      }
-      throw error;
-    } finally {
-      this.rpaLastSentAt = Date.now();
-    }
+    return settings.mode === 'rpa' ? nextActiveStart(settings.rpa.guard, now) : null;
   }
 
   async send(group: OpsGroup, text: string, context: { taskId?: string; attempt?: number; action?: string; images?: string[] }): Promise<SendResult> {
@@ -513,21 +496,13 @@ export class DistributionService {
     const action = context.action ?? '发送文本';
     if (!group.enabled) { this.logs.write({ ...base, action, status: 'fail', message: '群已停用，跳过' }); return { ok: false, detail: `${group.name}：群已停用` }; }
     if (!group.available) { this.logs.write({ ...base, action, status: 'fail', message: '找不到群（最近一次刷新时已不在列表中）' }); return { ok: false, detail: `${group.name}：找不到群，请到群管理刷新` }; }
+    if (group.channel === 'customer' && this.sendSettings().mode === 'rpa') return this.sendViaPool(group, text, { ...context, action });
     try {
       if (group.channel === 'bot') {
         await this.bot.sendText(group.chatId, text);
         this.logs.write({ ...base, action, status: 'ok', message: '机器人已发送' });
         this.onSent(group.id);
         return { ok: true, detail: `${group.name}：已发送` };
-      }
-      const settings = this.sendSettings();
-      if (settings.mode === 'rpa') {
-        const label = RPA_CLIENT_LABELS[settings.rpa.client];
-        const { sent, images } = await this.sendViaRpa(group, text, context.images ?? [], context);
-        const what = images ? `文字和 ${images} 张图` : '文字';
-        this.logs.write({ ...base, module: 'RPA', action, status: 'ok', message: sent ? `已通过${label}客户端发送${what}` : `已把${what}粘贴到${label}输入框，等待人工按发送` });
-        this.onSent(group.id);
-        return { ok: true, detail: `${group.name}：${sent ? `已通过${label}发送${what}` : `已粘贴到${label}，请人工按发送`}` };
       }
       if (isManualGroup(group)) throw new Error('手动添加的群只能用 RPA 发送，请在设置里切换到“桌面客户端（RPA）”');
       if (!this.customer.configured()) throw new Error('还没有配置客户群群发（设置 → 客户群群发）');
@@ -540,9 +515,27 @@ export class DistributionService {
       return { ok: true, detail: `${group.name}：已创建群发任务，等待群主确认` };
     } catch (error: any) {
       const message = error?.message || String(error);
-      const module = group.channel === 'customer' && this.sendSettings().mode === 'rpa' ? 'RPA' : 'WeCom';
-      this.logs.write({ ...base, module, action, status: 'fail', message });
+      this.logs.write({ ...base, action, status: 'fail', message });
       return { ok: false, detail: `${group.name}：${message}` };
+    }
+  }
+
+  /** RPA：按群绑定的账号发。本机账号的日志由执行器写；远程账号这里再记一条，主控也能看到结果。 */
+  private async sendViaPool(group: OpsGroup, text: string, context: { taskId?: string; attempt?: number; action: string; images?: string[] }): Promise<SendResult> {
+    const picked = this.accountFor(group);
+    const base = { module: 'RPA' as const, taskId: context.taskId, groupName: group.name, attempt: context.attempt, action: context.action };
+    if ('error' in picked) { this.logs.write({ ...base, status: 'fail', message: picked.error }); return { ok: false, detail: `${group.name}：${picked.error}` }; }
+    const { account } = picked;
+    const remote = account.kind === 'remote';
+    try {
+      const result = await this.accounts(account).send(group.name, text, context.images ?? [], { taskId: context.taskId, attempt: context.attempt, action: context.action, paced: Boolean(context.taskId) });
+      if (remote) this.logs.write({ ...base, account: account.id, status: 'ok', message: `账号“${account.name}”：${result.detail}` });
+      this.onSent(group.id);
+      return { ok: true, detail: `${group.name}：${remote ? `账号“${account.name}”` : ''}${result.detail}` };
+    } catch (error: any) {
+      const message = error?.message || String(error);
+      if (remote) this.logs.write({ ...base, account: account.id, status: 'fail', message: `账号“${account.name}”：${message}` });
+      return { ok: false, detail: `${group.name}：${remote ? `账号“${account.name}”：` : ''}${message}` };
     }
   }
 }

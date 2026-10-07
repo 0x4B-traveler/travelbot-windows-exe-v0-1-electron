@@ -1,4 +1,5 @@
-import type { ContentChannel, Material, Route, RpaSettings, SendSettings } from '../../src/domain/ops';
+import type { AccountStatus, ContentChannel, Material, Route, RpaSettings, SendSettings } from '../../src/domain/ops';
+import type { RpaSendContext, RpaSendResult } from './rpa-executor';
 
 // Application 层依赖的外部能力（端口）。具体实现放在 Infrastructure，由 main.ts 组装注入，
 // 这样以后把企业微信换成官方接口 / UI 自动化，或者把模板生成换成大模型，都不用动业务服务。
@@ -23,6 +24,12 @@ export interface DesktopRpaGateway {
   check(override?: RpaSettings): Promise<string>;
   /** 先发文字，再逐张发图片（本机文件路径）。sent=false 表示按设置只粘贴到了输入框，等人工按发送。 */
   sendText(groupName: string, text: string, images?: string[]): Promise<{ sent: boolean }>;
+}
+
+/** 账号池里一个账号的发送入口（本机执行器或局域网执行端），防封规则在执行的那台电脑上计算。 */
+export interface RpaAccountClient {
+  check(groupName?: string): Promise<AccountStatus>;
+  send(groupName: string, text: string, images: string[], context: RpaSendContext): Promise<RpaSendResult>;
 }
 
 export interface SendSettingsStore {

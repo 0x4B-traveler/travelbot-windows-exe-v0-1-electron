@@ -15,8 +15,11 @@ import { LocalFileStore } from './infrastructure/file-store';
 import { TemplateContentGenerator } from './infrastructure/template-generator';
 import { PowerShellRpaGateway } from './infrastructure/desktop-rpa';
 import { JsonSendSettingsStore } from './infrastructure/settings-store';
+import { lanAddresses, RemoteRpaAccount, RpaAgentServer } from './infrastructure/rpa-agent';
+import { RpaExecutor } from './application/rpa-executor';
+import { LOCAL_ACCOUNT_ID, type RpaAccount, type SendSettings } from '../src/domain/ops';
 import { ContentService, DashboardService, DistributionService, GroupService, LogService, MaterialService, RouteService, SendSettingsService, TaskService } from './application/services';
-import type { BotGateway, CustomerGroupGateway, WeatherGateway } from './application/ports';
+import type { BotGateway, CustomerGroupGateway, RpaAccountClient, WeatherGateway } from './application/ports';
 import { registerOpsApi } from './api/ops-ipc';
 
 const execFileAsync = promisify(execFile);
@@ -276,11 +279,21 @@ function setupOps(database: TravelDatabase) {
   // 发送方式：客户群走企业微信接口还是桌面客户端 RPA，在设置里切换，DistributionService 每次发送时读取
   const sendStore = new JsonSendSettingsStore(join(app.getPath('userData'), 'send-settings.json'));
   const rpa = new PowerShellRpaGateway(() => sendStore.get().rpa, join(app.getPath('userData'), 'rpa'));
-  const sendSettings = new SendSettingsService(sendStore, rpa, logs);
+  // 账号池：本机账号用执行器直接发；远程账号转给局域网里的执行端。本机切成执行端时启动局域网服务
+  const localRpa = new RpaExecutor(LOCAL_ACCOUNT_ID, rpa, () => sendStore.get().rpa, logs);
+  const accountClient = (account: RpaAccount): RpaAccountClient => account.kind === 'local' ? localRpa : new RemoteRpaAccount(account);
+  const agentServer = new RpaAgentServer(localRpa, join(app.getPath('userData'), 'rpa', 'incoming'));
+  const applyPool = (settings: SendSettings) => agentServer.apply(settings.pool.role === 'agent', settings.pool.agentPort, settings.pool.agentToken);
+  const sendSettings = new SendSettingsService(sendStore, localRpa, accountClient, () => {
+    const pool = sendStore.get().pool;
+    return { addresses: lanAddresses(), port: pool.agentPort, token: pool.agentToken, listening: agentServer.listening, error: agentServer.error || undefined };
+  }, logs, applyPool);
+  applyPool(sendStore.get());
+  app.on('before-quit', () => agentServer.stop());
   const contents = new ContentService(new ContentRepository(db), routes, materials, new TemplateContentGenerator(), logs, contentId => taskRepo.byContent(contentId));
   let distribution: DistributionService;
   const groups = new GroupService(groupRepo, bot, customer, logs, () => distribution, () => sendStore.get());
-  distribution = new DistributionService(bot, customer, rpa, () => sendStore.get(), logs, groupId => groups.markSent(groupId));
+  distribution = new DistributionService(bot, customer, accountClient, () => sendStore.get(), logs, groupId => groups.markSent(groupId));
   const tasks = new TaskService(taskRepo, contents, groups, distribution, weather, logs);
   const dashboard = new DashboardService(tasks, contents, routes, groups);
   contents.migrateTemplates(db);
