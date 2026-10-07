@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, Tray, Menu, nativeImage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, Tray, Menu, nativeImage, Notification } from 'electron';
 import { join } from 'node:path';
 import type { CustomerGroup, DailyPushSettings, ItineraryItem, ItinerarySettings } from '../src/domain/business';
 import { TravelDatabase } from './services/database';
@@ -138,7 +138,12 @@ function setupOps(database: TravelDatabase) {
   const sendStore = new JsonSendSettingsStore(join(app.getPath('userData'), 'send-settings.json'));
   const rpa = new PowerShellRpaGateway(() => sendStore.get().rpa, join(app.getPath('userData'), 'rpa'));
   // 账号池：本机账号用执行器直接发；远程账号转给局域网里的执行端。本机切成执行端时启动局域网服务
-  const localRpa = new RpaExecutor(LOCAL_ACCOUNT_ID, rpa, () => sendStore.get().rpa, logs);
+  // 客户端弹出安全验证时弹系统通知并闪烁任务栏：验证有时限，超时会被退出登录
+  const alertLocked = (reason: string) => {
+    if (Notification.isSupported()) new Notification({ title: '企业微信要求安全验证，已暂停发送', body: reason }).show();
+    mainWindow?.flashFrame(true);
+  };
+  const localRpa = new RpaExecutor(LOCAL_ACCOUNT_ID, rpa, () => sendStore.get().rpa, logs, alertLocked);
   const accountClient = (account: RpaAccount): RpaAccountClient => account.kind === 'local' ? localRpa : new RemoteRpaAccount(account);
   const agentServer = new RpaAgentServer(localRpa, join(app.getPath('userData'), 'rpa', 'incoming'));
   const applyPool = (settings: SendSettings) => agentServer.apply(settings.pool.role === 'agent', settings.pool.agentPort, settings.pool.agentToken);

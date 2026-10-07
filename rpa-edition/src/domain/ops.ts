@@ -206,7 +206,7 @@ export function resolveAccount(pool: PoolSettings, accountId?: string): RpaAccou
 export type AccountStatus = { ok: boolean; detail: string; client?: string; sentToday?: number; pausedUntil?: string };
 
 export type SendSettings = { rpa: RpaSettings; pool: PoolSettings };
-export const DEFAULT_RPA_GUARD: RpaGuard = { groupGapMinSec: 20, groupGapMaxSec: 60, activeStart: '07:30', activeEnd: '21:30', maxPerHour: 20, maxPerDay: 80, maxPerGroupPerDay: 3, pauseAfterFailures: 3, pauseMinutes: 30, varyOpening: false, maxImages: 3 };
+export const DEFAULT_RPA_GUARD: RpaGuard = { groupGapMinSec: 60, groupGapMaxSec: 180, activeStart: '07:30', activeEnd: '21:30', maxPerHour: 10, maxPerDay: 40, maxPerGroupPerDay: 3, pauseAfterFailures: 3, pauseMinutes: 30, varyOpening: true, maxImages: 3 };
 export const DEFAULT_SEND_SETTINGS: SendSettings = { rpa: { client: 'wecom', autoSend: true, sendKey: 'enter', searchHotkey: '^f', stepDelayMs: 800, clientPath: '', verifyChat: true, guard: DEFAULT_RPA_GUARD }, pool: DEFAULT_POOL_SETTINGS };
 
 // ───────── 运行日志 ─────────

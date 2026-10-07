@@ -7,10 +7,11 @@ import type { RpaSendContext, RpaSendResult } from './rpa-executor';
 
 /** 桌面客户端 RPA：在本机企业微信 / 微信里按群名搜索并发送，不需要接口权限和可信 IP。 */
 export interface DesktopRpaGateway {
-  /** 只检查能否找到客户端窗口，不发送。override 用于保存前先试一下界面上的设置。 */
+  /** 只检查能否找到客户端窗口、有没有弹出安全验证，不发送。override 用于保存前先试一下界面上的设置。 */
   check(override?: RpaSettings): Promise<string>;
   /** 先发文字，再逐张发图片（本机文件路径）。sent=false 表示按设置只粘贴到了输入框，等人工按发送。 */
-  sendText(groupName: string, text: string, images?: string[]): Promise<{ sent: boolean }>;
+  /** 发完客户端弹出了安全验证时 locked 带上原因（这条已经发出，不能算失败重发）。 */
+  sendText(groupName: string, text: string, images?: string[]): Promise<{ sent: boolean; locked?: string }>;
 }
 
 /** 账号池里一个账号的发送入口（本机执行器或局域网执行端），防封规则在执行的那台电脑上计算。 */

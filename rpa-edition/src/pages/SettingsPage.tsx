@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { call } from '../api';
-import { DEFAULT_AGENT_PORT, POOL_ROLE_LABELS, RPA_CLIENT_LABELS, type AccountStatus, type PoolRole, type PoolSettings, type RpaAccount, type RpaClient, type RpaGuard, type RpaSettings, type SendSettings } from '../domain/ops';
+import { DEFAULT_AGENT_PORT, DEFAULT_RPA_GUARD, POOL_ROLE_LABELS, RPA_CLIENT_LABELS, type AccountStatus, type PoolRole, type PoolSettings, type RpaAccount, type RpaClient, type RpaGuard, type RpaSettings, type SendSettings } from '../domain/ops';
 import { Card, Field, Notice, useAction } from '../ui';
 
 /** 设置：RPA 发送（桌面客户端、防封规则、账号池），保存后立即生效。不属于核心业务模块。 */
@@ -54,7 +54,8 @@ export function SettingsPage() {
           </div>
           <label className="toggle-row"><input type="checkbox" checked={rpa.verifyChat} onChange={event => patch({ verifyChat: event.target.checked })} />发送前核对群名（用 Windows 自带 OCR 识别聊天标题，对不上就不发）</label>
           <h4 className="sub-title">防封设置</h4>
-          <p className="hint">按真人的节奏发：每一步操作都带随机停顿，群与群之间随机间隔；限制每小时、每天和单群的发送次数；只在白天时段发，时段外到点的任务自动顺延；连续失败会自动暂停，避免客户端掉线或弹验证时还在反复操作。</p>
+          <p className="hint">按真人的节奏发：每一步操作都带随机停顿，群与群之间随机间隔；限制每小时、每天和单群的发送次数；只在白天时段发，时段外到点的任务自动顺延；连续失败会自动暂停。发送前后会检查{label}有没有弹出“安全验证 / 设备环境异常”，一旦弹出就暂停全部发送并弹通知，扫码验证后点“检测本机客户端”恢复。</p>
+          <p className="hint">降低风控的做法：用一台专用的实体电脑长期登录，不开远程控制、录屏和抓包工具；发送时不要有人操作这台电脑；新账号前一两周少发，可以先用“只粘贴，人工按发送”。<button className="link" onClick={() => patchGuard({ groupGapMinSec: DEFAULT_RPA_GUARD.groupGapMinSec, groupGapMaxSec: DEFAULT_RPA_GUARD.groupGapMaxSec, maxPerHour: DEFAULT_RPA_GUARD.maxPerHour, maxPerDay: DEFAULT_RPA_GUARD.maxPerDay, maxPerGroupPerDay: DEFAULT_RPA_GUARD.maxPerGroupPerDay, varyOpening: true })}>使用推荐的保守设置</button>（改完点“保存”）</p>
           <div className="form-grid">
             <Field label="群与群间隔（秒）" hint="每发完一个群随机等待这么久再发下一个">
               <div className="inline-actions"><input type="number" min={0} max={600} value={guard.groupGapMinSec} onChange={num('groupGapMinSec')} /><span>到</span><input type="number" min={0} max={1800} value={guard.groupGapMaxSec} onChange={num('groupGapMaxSec')} /></div>
