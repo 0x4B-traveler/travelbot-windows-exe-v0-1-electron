@@ -150,6 +150,8 @@ export type RpaSettings = {
   clientPath: string;
   /** 打开聊天后用 Windows 自带 OCR 识别聊天标题，和群名对不上就不发。 */
   verifyChat: boolean;
+  /** 发送成功后把客户端窗口最小化，并切回发送前的前台窗口，不让客户端一直停在前台。 */
+  minimizeAfterSend: boolean;
   guard: RpaGuard;
 };
 /** 防封：按真人的节奏、频率和时段发送，出问题自动停手。 */
@@ -207,7 +209,7 @@ export type AccountStatus = { ok: boolean; detail: string; client?: string; sent
 
 export type SendSettings = { rpa: RpaSettings; pool: PoolSettings };
 export const DEFAULT_RPA_GUARD: RpaGuard = { groupGapMinSec: 60, groupGapMaxSec: 180, activeStart: '07:30', activeEnd: '21:30', maxPerHour: 10, maxPerDay: 40, maxPerGroupPerDay: 3, pauseAfterFailures: 3, pauseMinutes: 30, varyOpening: true, maxImages: 3 };
-export const DEFAULT_SEND_SETTINGS: SendSettings = { rpa: { client: 'wecom', autoSend: true, sendKey: 'enter', searchHotkey: '^f', stepDelayMs: 800, clientPath: '', verifyChat: true, guard: DEFAULT_RPA_GUARD }, pool: DEFAULT_POOL_SETTINGS };
+export const DEFAULT_SEND_SETTINGS: SendSettings = { rpa: { client: 'wecom', autoSend: true, sendKey: 'enter', searchHotkey: '^f', stepDelayMs: 800, clientPath: '', verifyChat: true, minimizeAfterSend: true, guard: DEFAULT_RPA_GUARD }, pool: DEFAULT_POOL_SETTINGS };
 
 // ───────── 运行日志 ─────────
 export type LogModule = 'Scheduler' | 'Task' | 'Content' | 'Group' | 'Itinerary' | 'DailyPush' | 'RPA' | 'System';

@@ -20,7 +20,7 @@ const CLIENT_PROFILES: Record<RpaClient, ClientProfile> = {
   wechat: { processes: ['Weixin', 'WeChat'], windows: [{ cls: 'WeChatMainWndForPC' }, { cls: 'mmui::MainWindow', title: '微信' }, { cls: 'Qt51514QWindowIcon', title: '微信' }] },
 };
 
-type Job = ClientProfile & { action: 'check' | 'send'; clientPath: string; searchHotkey: string; sendKeys: string; autoSend: boolean; delayMs: number; verifyChat: boolean; workDir: string; target?: string; text?: string; images?: string[] };
+type Job = ClientProfile & { action: 'check' | 'send'; clientPath: string; searchHotkey: string; sendKeys: string; autoSend: boolean; delayMs: number; verifyChat: boolean; minimizeAfterSend: boolean; workDir: string; target?: string; text?: string; images?: string[] };
 type ScriptResult = { ok: boolean; code: string; message: string };
 
 export class PowerShellRpaGateway implements DesktopRpaGateway {
@@ -66,6 +66,7 @@ export class PowerShellRpaGateway implements DesktopRpaGateway {
       sendKeys: settings.sendKey === 'ctrlEnter' ? '^{ENTER}' : '{ENTER}',
       autoSend: settings.autoSend,
       verifyChat: settings.verifyChat,
+      minimizeAfterSend: settings.minimizeAfterSend,
       workDir: this.workDir,
       delayMs: Math.min(5000, Math.max(200, Math.round(settings.stepDelayMs) || 800)),
     };
@@ -415,6 +416,8 @@ try {
     exit 0
   }
 
+  # The window the person was using, to give the screen back after sending
+  $previous = [RpaWin]::GetForegroundWindow()
   $saved = $null
   try { if ([System.Windows.Forms.Clipboard]::ContainsText()) { $saved = [System.Windows.Forms.Clipboard]::GetText() } } catch { }
   try {
@@ -459,6 +462,15 @@ try {
     if (-not $locked) { Wait-Step 1.5; $locked = Test-SecurityPromptAfterSend $h ([string]$job.workDir) }
   } finally {
     try { if ($null -ne $saved -and $saved.Length -gt 0) { [System.Windows.Forms.Clipboard]::SetText($saved) } else { [System.Windows.Forms.Clipboard]::Clear() } } catch { }
+  }
+  # Done: minimize the client the way a person would and return to the window that was in front before.
+  # Not when a security prompt is up, which has to stay visible for the QR scan
+  if ($job.minimizeAfterSend -and $job.autoSend -and -not $locked) {
+    try {
+      Wait-Step 1
+      [RpaWin]::ShowWindow($h, 6) | Out-Null
+      if ($previous -ne [IntPtr]::Zero -and $previous -ne $h -and (Get-WindowPid $previous) -ne (Get-WindowPid $h)) { [RpaWin]::SetForegroundWindow($previous) | Out-Null }
+    } catch { }
   }
   if ($locked) { Out-Result $true 'SENT_LOCKED' $locked } else { Out-Result $true 'SENT' $title }
 } catch {

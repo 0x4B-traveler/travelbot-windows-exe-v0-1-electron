@@ -53,6 +53,7 @@ export function SettingsPage() {
             <Field label="每次附带攻略图（张）" hint="取内容关联路线里素材的图片，0 表示只发文字"><input type="number" min={0} max={9} value={guard.maxImages} onChange={num('maxImages')} /></Field>
           </div>
           <label className="toggle-row"><input type="checkbox" checked={rpa.verifyChat} onChange={event => patch({ verifyChat: event.target.checked })} />发送前核对群名（用 Windows 自带 OCR 识别聊天标题，对不上就不发）</label>
+          <label className="toggle-row"><input type="checkbox" checked={rpa.minimizeAfterSend} onChange={event => patch({ minimizeAfterSend: event.target.checked })} />发送成功后把{label}最小化，切回原来的窗口</label>
           <h4 className="sub-title">防封设置</h4>
           <p className="hint">按真人的节奏发：每一步操作都带随机停顿，群与群之间随机间隔；限制每小时、每天和单群的发送次数；只在白天时段发，时段外到点的任务自动顺延；连续失败会自动暂停。发送前后会检查{label}有没有弹出“安全验证 / 设备环境异常”，一旦弹出就暂停全部发送并弹通知，扫码验证后点“检测本机客户端”恢复。</p>
           <p className="hint">降低风控的做法：用一台专用的实体电脑长期登录，不开远程控制、录屏和抓包工具；发送时不要有人操作这台电脑；新账号前一两周少发，可以先用“只粘贴，人工按发送”。<button className="link" onClick={() => patchGuard({ groupGapMinSec: DEFAULT_RPA_GUARD.groupGapMinSec, groupGapMaxSec: DEFAULT_RPA_GUARD.groupGapMaxSec, maxPerHour: DEFAULT_RPA_GUARD.maxPerHour, maxPerDay: DEFAULT_RPA_GUARD.maxPerDay, maxPerGroupPerDay: DEFAULT_RPA_GUARD.maxPerGroupPerDay, varyOpening: true })}>使用推荐的保守设置</button>（改完点“保存”）</p>
