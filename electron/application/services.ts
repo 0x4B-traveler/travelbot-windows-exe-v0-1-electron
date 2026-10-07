@@ -6,7 +6,7 @@ import {
   type GenerateInput, type GroupMatchMode, type ImportResult, type LogEntry, type LogQuery, type Material, type MaterialFacets,
   type MaterialInput, type MaterialKind, type MaterialQuery, type OpsGroup, type OpsTask, type RefreshResult, type Route, type RouteInput,
   type RouteQuery, type TaskInput, type TaskRepeat, type TaskRun, type TaskStatus,
-  DEFAULT_SEND_SETTINGS, MANUAL_CHAT_PREFIX, RPA_CLIENT_LABELS, isManualGroup, type RpaSettings, type SendSettings,
+  DEFAULT_SEND_SETTINGS, MANUAL_CHAT_PREFIX, RPA_CLIENT_LABELS, isManualGroup, type RpaGuard, type RpaSettings, type SendSettings,
 } from '../../src/domain/ops';
 import { ContentRepository, GroupRepository, LogRepository, MaterialRepository, RouteRepository, TaskRepository, type StoredTask } from '../infrastructure/repositories';
 import type { BotGateway, ContentGenerator, CustomerGroupGateway, DesktopRpaGateway, FilePicker, FileStore, SendSettingsStore, WeatherGateway } from './ports';
@@ -26,6 +26,7 @@ export class LogService {
   write(entry: Omit<LogEntry, 'id' | 'time'>) { try { this.repo.add(entry); } catch { /* 日志失败不能影响业务 */ } }
   list(query: LogQuery) { return this.repo.list(query); }
   sentToday(groupName: string) { return this.repo.countSentSince(groupName, startOfLocalDay(new Date()).toISOString()); }
+  rpaSentSince(since: Date, groupName?: string) { return this.repo.countRpaSentSince(since.toISOString(), groupName); }
   /** 只保留最近 60 天的日志。 */
   prune() { this.repo.prune(new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString()); }
 }
@@ -90,6 +91,9 @@ export class MaterialService {
     if (path) this.files.remove(path);
     return this.repo.get(id) ?? fail('素材不存在或已被删除');
   }
+
+  /** 图片在本机的保存路径（RPA 发图用）。 */
+  imageFile(imageId: string): string | null { return this.repo.imagePath(imageId); }
 
   imageData(imageId: string) {
     const path = this.repo.imagePath(imageId);
@@ -187,6 +191,14 @@ export class ContentService {
     if (!['approved', 'scheduled', 'sent'].includes(piece.status)) fail(`内容“${piece.title}”还未审核通过（当前：${CONTENT_STATUS_LABELS[piece.status]}）`);
     return piece;
   }
+  /** 内容关联路线里素材的图片（攻略图、景点图），按路线顺序，RPA 发送时跟在文字后面。 */
+  imagePaths(piece: ContentPiece): string[] {
+    if (!piece.routeId) return [];
+    let route: Route;
+    try { route = this.routes.get(piece.routeId); } catch { return []; }
+    const paths = this.routeMaterials(route).flatMap(material => material.images.map(image => this.materials.imageFile(image.id)));
+    return cleanList(paths.filter((path): path is string => Boolean(path)));
+  }
   markScheduled(id: string) { const piece = this.repo.get(id); if (piece?.status === 'approved') this.repo.update(id, { status: 'scheduled' }); }
   markSent(id: string) { const piece = this.repo.get(id); if (piece && piece.status !== 'sent') this.repo.update(id, { status: 'sent' }); }
   /** 相关任务全部取消且从未发送时，内容回到“已通过”，可以重新排期或修改。 */
@@ -259,6 +271,27 @@ function normalizeRpa(input?: Partial<RpaSettings>): RpaSettings {
     searchHotkey: String(input?.searchHotkey ?? '').trim() || base.searchHotkey,
     stepDelayMs: Number.isFinite(delay) ? Math.min(5000, Math.max(200, Math.round(delay))) : base.stepDelayMs,
     clientPath: String(input?.clientPath ?? '').trim(),
+    guard: normalizeGuard(input?.guard),
+  };
+}
+
+function normalizeGuard(input?: Partial<RpaGuard>): RpaGuard {
+  const base = DEFAULT_SEND_SETTINGS.rpa.guard;
+  const int = (value: unknown, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback; };
+  const time = (value: unknown, fallback: string) => { const text = String(value ?? '').trim(); return /^([01]?\d|2[0-3]):[0-5]\d$/.test(text) ? text : fallback; };
+  const gapMin = int(input?.groupGapMinSec, base.groupGapMinSec, 0, 600);
+  return {
+    groupGapMinSec: gapMin,
+    groupGapMaxSec: Math.max(gapMin, int(input?.groupGapMaxSec, base.groupGapMaxSec, 0, 1800)),
+    activeStart: time(input?.activeStart, base.activeStart),
+    activeEnd: time(input?.activeEnd, base.activeEnd),
+    maxPerHour: int(input?.maxPerHour, base.maxPerHour, 0, 1000),
+    maxPerDay: int(input?.maxPerDay, base.maxPerDay, 0, 10000),
+    maxPerGroupPerDay: int(input?.maxPerGroupPerDay, base.maxPerGroupPerDay, 0, 100),
+    pauseAfterFailures: int(input?.pauseAfterFailures, base.pauseAfterFailures, 0, 20),
+    pauseMinutes: int(input?.pauseMinutes, base.pauseMinutes, 1, 24 * 60),
+    varyOpening: input?.varyOpening ?? base.varyOpening,
+    maxImages: int(input?.maxImages, base.maxImages, 0, 9),
   };
 }
 
@@ -344,11 +377,45 @@ export class GroupService {
 // ───────── 分发适配（怎么发） ─────────
 export type SendResult = { ok: boolean; detail: string };
 
+/** 防封规则拦下的发送：不算 RPA 故障，不触发熔断。 */
+class GuardBlocked extends Error {}
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const randomBetween = (min: number, max: number) => min + Math.random() * Math.max(0, max - min);
+function minutesOf(hhmm: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+/** 不在发送时段时返回下一个时段开始的时间，在时段内返回 null。支持跨零点（如 22:00–02:00）。 */
+export function nextActiveStart(guard: RpaGuard, now: Date): Date | null {
+  const start = minutesOf(guard.activeStart); const end = minutesOf(guard.activeEnd);
+  if (start === null || end === null || start === end) return null;
+  const current = now.getHours() * 60 + now.getMinutes();
+  const inside = start < end ? current >= start && current < end : current >= start || current < end;
+  if (inside) return null;
+  const next = new Date(now); next.setHours(Math.floor(start / 60), start % 60, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  return next;
+}
+const GREETINGS = { morning: '早上好', noon: '中午好', afternoon: '下午好', evening: '晚上好' };
+/** 开头随机加一句问候，让不同群收到的文字略有不同。 */
+function varyOpening(text: string, now: Date): string {
+  const hour = now.getHours();
+  const word = hour < 11 ? GREETINGS.morning : hour < 14 ? GREETINGS.noon : hour < 18 ? GREETINGS.afternoon : GREETINGS.evening;
+  const forms = [`${word}～`, `大家${word}！`, `各位${word}`, `${word}呀`, `亲们${word}～`, `Hi 各位，${word}`];
+  return `${forms[Math.floor(Math.random() * forms.length)]}\n${text}`;
+}
+
 export class DistributionService {
+  /** RPA 熔断状态：连续失败次数、暂停到什么时候、上一次发出的时间（控制群间隔）。 */
+  private rpaFailures = 0;
+  private rpaPausedUntil = 0;
+  private rpaLastSentAt = 0;
+
   constructor(private readonly bot: BotGateway, private readonly customer: CustomerGroupGateway, private readonly rpa: DesktopRpaGateway, private readonly sendSettings: () => SendSettings, private readonly logs: LogService, private readonly onSent: (groupId: string) => void) {}
 
   /** 预演：做发送前的全部检查，客户群还会用只读接口确认凭证、可信 IP 和群是否还在，但不创建群发任务。 */
-  async dryRun(groups: OpsGroup[], context: { taskId?: string }): Promise<DryRunGroup[]> {
+  async dryRun(groups: OpsGroup[], context: { taskId?: string; imageCount?: number }): Promise<DryRunGroup[]> {
     const results: DryRunGroup[] = [];
     let botChats: Set<string> | null | Error = null;
     const customerChats = new Map<string, Set<string> | Error>();
@@ -370,9 +437,14 @@ export class DistributionService {
       }
       if (settings.mode === 'rpa') {
         const label = RPA_CLIENT_LABELS[settings.rpa.client];
+        const blocked = this.guardBlock(group, new Date());
+        if (blocked) { result(false, `防封规则：${blocked}`); continue; }
         if (rpaCheck === null) rpaCheck = await this.rpa.check().catch(error => (error instanceof Error ? error : new Error(String(error))));
         if (rpaCheck instanceof Error) result(false, rpaCheck.message);
-        else result(true, `${label}客户端正常，正式执行时会在${label}里搜索“${group.name}”并${settings.rpa.autoSend ? '自动发送' : '粘贴到输入框，等人工按发送'}`);
+        else {
+          const images = Math.min(context.imageCount ?? 0, settings.rpa.guard.maxImages);
+          result(true, `${label}客户端正常，正式执行时会在${label}里搜索“${group.name}”，${images ? `发文字和 ${images} 张图` : '发文字'}并${settings.rpa.autoSend ? '自动发送' : '粘贴到输入框，等人工按发送'}`);
+        }
         continue;
       }
       if (isManualGroup(group)) { result(false, '手动添加的群只能用 RPA 发送，请在设置里切换到“桌面客户端（RPA）”'); continue; }
@@ -388,7 +460,55 @@ export class DistributionService {
     return results;
   }
 
-  async send(group: OpsGroup, text: string, context: { taskId?: string; attempt?: number; action?: string }): Promise<SendResult> {
+  /** RPA 模式下当前不能发（时段外或熔断暂停中）时，返回可以重新尝试的时间，供运营任务顺延。 */
+  rpaDeferUntil(now: Date): Date | null {
+    const settings = this.sendSettings();
+    if (settings.mode !== 'rpa') return null;
+    if (this.rpaPausedUntil > now.getTime()) return new Date(this.rpaPausedUntil);
+    return nextActiveStart(settings.rpa.guard, now);
+  }
+
+  /** 防封规则检查：返回拦截原因，可以发时返回 null。 */
+  private guardBlock(group: OpsGroup, now: Date): string | null {
+    const guard = this.sendSettings().rpa.guard;
+    if (this.rpaPausedUntil > now.getTime()) return `RPA 连续失败后暂停中，${fmt(new Date(this.rpaPausedUntil))} 后恢复`;
+    if (nextActiveStart(guard, now)) return `不在发送时段（${guard.activeStart}–${guard.activeEnd}）`;
+    if (guard.maxPerHour > 0 && this.logs.rpaSentSince(new Date(now.getTime() - 3600 * 1000)) >= guard.maxPerHour) return `最近一小时已发 ${guard.maxPerHour} 次，达到上限`;
+    const today = startOfLocalDay(now);
+    if (guard.maxPerDay > 0 && this.logs.rpaSentSince(today) >= guard.maxPerDay) return `今天已发 ${guard.maxPerDay} 次，达到每日上限`;
+    if (guard.maxPerGroupPerDay > 0 && this.logs.rpaSentSince(today, group.name) >= guard.maxPerGroupPerDay) return `这个群今天已发 ${guard.maxPerGroupPerDay} 次，达到单群上限`;
+    return null;
+  }
+
+  private async sendViaRpa(group: OpsGroup, text: string, images: string[], context: { taskId?: string }): Promise<{ sent: boolean; images: number }> {
+    const settings = this.sendSettings(); const guard = settings.rpa.guard;
+    const blocked = this.guardBlock(group, new Date());
+    if (blocked) throw new GuardBlocked(`防封规则：${blocked}，本次未发送`);
+    // 运营任务连发多个群时，群与群之间随机停一会儿，像人一样一个个发
+    if (context.taskId && this.rpaLastSentAt) {
+      const gapMs = randomBetween(guard.groupGapMinSec, Math.max(guard.groupGapMinSec, guard.groupGapMaxSec)) * 1000;
+      const wait = this.rpaLastSentAt + gapMs - Date.now();
+      if (wait > 0) await sleep(wait);
+    }
+    const attachments = images.slice(0, Math.max(0, guard.maxImages));
+    try {
+      const result = await this.rpa.sendText(group.name, guard.varyOpening ? varyOpening(text, new Date()) : text, attachments);
+      this.rpaFailures = 0;
+      return { sent: result.sent, images: attachments.length };
+    } catch (error) {
+      this.rpaFailures += 1;
+      if (guard.pauseAfterFailures > 0 && this.rpaFailures >= guard.pauseAfterFailures) {
+        this.rpaPausedUntil = Date.now() + Math.max(1, guard.pauseMinutes) * 60 * 1000;
+        this.rpaFailures = 0;
+        this.logs.write({ module: 'RPA', action: '熔断暂停', status: 'fail', taskId: context.taskId, message: `连续失败 ${guard.pauseAfterFailures} 次，RPA 暂停到 ${fmt(new Date(this.rpaPausedUntil))}，请检查客户端是否掉线或弹出了验证` });
+      }
+      throw error;
+    } finally {
+      this.rpaLastSentAt = Date.now();
+    }
+  }
+
+  async send(group: OpsGroup, text: string, context: { taskId?: string; attempt?: number; action?: string; images?: string[] }): Promise<SendResult> {
     const base = { module: 'WeCom' as const, taskId: context.taskId, groupName: group.name, attempt: context.attempt };
     const action = context.action ?? '发送文本';
     if (!group.enabled) { this.logs.write({ ...base, action, status: 'fail', message: '群已停用，跳过' }); return { ok: false, detail: `${group.name}：群已停用` }; }
@@ -403,10 +523,11 @@ export class DistributionService {
       const settings = this.sendSettings();
       if (settings.mode === 'rpa') {
         const label = RPA_CLIENT_LABELS[settings.rpa.client];
-        const { sent } = await this.rpa.sendText(group.name, text);
-        this.logs.write({ ...base, module: 'RPA', action, status: 'ok', message: sent ? `已通过${label}客户端发送` : `已粘贴到${label}输入框，等待人工按发送` });
+        const { sent, images } = await this.sendViaRpa(group, text, context.images ?? [], context);
+        const what = images ? `文字和 ${images} 张图` : '文字';
+        this.logs.write({ ...base, module: 'RPA', action, status: 'ok', message: sent ? `已通过${label}客户端发送${what}` : `已把${what}粘贴到${label}输入框，等待人工按发送` });
         this.onSent(group.id);
-        return { ok: true, detail: `${group.name}：${sent ? `已通过${label}发送` : `已粘贴到${label}，请人工按发送`}` };
+        return { ok: true, detail: `${group.name}：${sent ? `已通过${label}发送${what}` : `已粘贴到${label}，请人工按发送`}` };
       }
       if (isManualGroup(group)) throw new Error('手动添加的群只能用 RPA 发送，请在设置里切换到“桌面客户端（RPA）”');
       if (!this.customer.configured()) throw new Error('还没有配置客户群群发（设置 → 客户群群发）');
@@ -509,7 +630,7 @@ export class TaskService {
     const text = await this.compose(content.body, draft.weatherCity, new Date(), draft.id);
     const groups = this.groups.getMany(draft.groupIds);
     const missing = draft.groupIds.length - groups.length;
-    const results = await this.distribution.dryRun(groups, { taskId: draft.id });
+    const results = await this.distribution.dryRun(groups, { taskId: draft.id, imageCount: this.contents.imagePaths(content).length });
     for (let index = 0; index < missing; index += 1) results.push({ name: '（已删除的群）', channel: 'bot', ok: false, detail: '群已被删除' });
     const ok = results.every(item => item.ok);
     this.logs.write({ module: 'Task', action: '预演', status: ok ? 'ok' : 'fail', taskId: draft.id, message: `【预演，未发送】“${content.title}”：${results.filter(item => item.ok).length}/${results.length} 个群检查通过` });
@@ -553,25 +674,35 @@ export class TaskService {
     const isRetry = task.retryGroupIds.length > 0 || task.attempts > 0;
     if (!isRetry && now.getTime() - dueAt.getTime() > MISSED_AFTER_MS) return this.skipMissed(task, dueAt, now);
 
+    const targetIds = task.retryGroupIds.length ? task.retryGroupIds : task.groupIds;
+    const groups = this.groups.getMany(targetIds);
+    // RPA 防封：时段外或熔断暂停中，整个任务顺延，不算失败、不占重试次数
+    const deferUntil = groups.some(group => group.channel === 'customer') ? this.distribution.rpaDeferUntil(now) : null;
+    if (deferUntil) {
+      this.repo.save({ ...task, status: 'pending', nextRunAt: deferUntil.toISOString(), lastResult: `RPA 防封：顺延到 ${fmt(deferUntil)}` });
+      this.logs.write({ module: 'RPA', action: '顺延任务', status: 'info', taskId: task.id, message: `当前不在 RPA 发送时段或暂停中，任务顺延到 ${fmt(deferUntil)}` });
+      return;
+    }
+
     this.repo.save({ ...task, status: 'running' });
     const attempt = task.attempts + 1;
     const startedAt = new Date();
     this.logs.write({ module: 'Scheduler', action: '开始执行', status: 'info', taskId: task.id, attempt, message: `第 ${attempt} 次执行` });
 
     let text = '';
+    let images: string[] = [];
     try {
       const content = this.contents.assertSendable(task.contentId);
       text = await this.compose(content.body, task.weatherCity, now, task.id);
+      images = this.contents.imagePaths(content);
     } catch (error: any) {
       return this.finish(task, startedAt, attempt, [], [error?.message || String(error)], task.groupIds);
     }
 
-    const targetIds = task.retryGroupIds.length ? task.retryGroupIds : task.groupIds;
-    const groups = this.groups.getMany(targetIds);
     const missing = targetIds.filter(id => !groups.some(group => group.id === id));
     const okDetails: string[] = []; const failDetails: string[] = missing.map(() => '群已被删除'); const failedIds: string[] = [];
     for (const group of groups) {
-      const result = await this.distribution.send(group, text, { taskId: task.id, attempt });
+      const result = await this.distribution.send(group, text, { taskId: task.id, attempt, images });
       if (result.ok) okDetails.push(result.detail); else { failDetails.push(result.detail); failedIds.push(group.id); }
     }
     this.finish(task, startedAt, attempt, okDetails, failDetails, failedIds);

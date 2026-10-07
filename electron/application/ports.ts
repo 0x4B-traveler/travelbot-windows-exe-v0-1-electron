@@ -21,8 +21,8 @@ export interface CustomerGroupGateway {
 export interface DesktopRpaGateway {
   /** 只检查能否找到客户端窗口，不发送。override 用于保存前先试一下界面上的设置。 */
   check(override?: RpaSettings): Promise<string>;
-  /** sent=false 表示按设置只粘贴到了输入框，等人工按发送。 */
-  sendText(groupName: string, text: string): Promise<{ sent: boolean }>;
+  /** 先发文字，再逐张发图片（本机文件路径）。sent=false 表示按设置只粘贴到了输入框，等人工按发送。 */
+  sendText(groupName: string, text: string, images?: string[]): Promise<{ sent: boolean }>;
 }
 
 export interface SendSettingsStore {

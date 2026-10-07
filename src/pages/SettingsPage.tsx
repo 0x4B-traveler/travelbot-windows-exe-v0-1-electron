@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { GroupMessageConfigView } from '../domain/business';
 import { call } from '../api';
-import { RPA_CLIENT_LABELS, SEND_MODE_LABELS, type RpaClient, type RpaSettings, type SendMode, type SendSettings } from '../domain/ops';
+import { RPA_CLIENT_LABELS, SEND_MODE_LABELS, type RpaClient, type RpaGuard, type RpaSettings, type SendMode, type SendSettings } from '../domain/ops';
 import { Card, Field, Notice, Tabs, useAction } from '../ui';
 
 export type ConnectionState = 'checking' | 'unauthorized' | 'authorizing' | 'authorized' | 'error';
@@ -23,6 +23,9 @@ function SendModeCard() {
   useEffect(() => { void call('settings.getSend').then(value => { setSaved(value); setMode(value.mode); setRpa(value.rpa); }); }, []);
   if (!saved || !rpa) return <Card title="客户群发送方式"><p className="hint">正在加载…</p></Card>;
   const patch = (next: Partial<RpaSettings>) => setRpa({ ...rpa, ...next });
+  const guard = rpa.guard;
+  const patchGuard = (next: Partial<RpaGuard>) => setRpa({ ...rpa, guard: { ...guard, ...next } });
+  const num = (key: keyof RpaGuard) => (event: React.ChangeEvent<HTMLInputElement>) => patchGuard({ [key]: Number(event.target.value) } as Partial<RpaGuard>);
   const dirty = mode !== saved.mode || JSON.stringify(rpa) !== JSON.stringify(saved.rpa);
   const save = () => void run(async () => {
     const next = await call('settings.saveSend', { mode, rpa });
@@ -47,7 +50,25 @@ function SendModeCard() {
             <Field label="搜索快捷键" hint="^ 表示 Ctrl，% 表示 Alt，默认 ^f（Ctrl+F）"><input value={rpa.searchHotkey} onChange={event => patch({ searchHotkey: event.target.value })} /></Field>
             <Field label="每步等待（毫秒）" hint="电脑或网络较慢、搜索结果出来得慢时调大"><input type="number" min={200} max={5000} step={100} value={rpa.stepDelayMs} onChange={event => patch({ stepDelayMs: Number(event.target.value) })} /></Field>
             <Field label="客户端路径（可选）" hint={`${label}没打开时自动启动，例如 C:\\Program Files\\…\\${rpa.client === 'wecom' ? 'WXWork.exe' : 'Weixin.exe'}`}><input value={rpa.clientPath} onChange={event => patch({ clientPath: event.target.value })} placeholder="留空则需要手动打开客户端" /></Field>
+            <Field label="每次附带攻略图（张）" hint="取内容关联路线里素材的图片，0 表示只发文字"><input type="number" min={0} max={9} value={guard.maxImages} onChange={num('maxImages')} /></Field>
           </div>
+          <h4 className="sub-title">防封设置</h4>
+          <p className="hint">按真人的节奏发：每一步操作都带随机停顿，群与群之间随机间隔；限制每小时、每天和单群的发送次数；只在白天时段发，时段外到点的任务自动顺延；连续失败会自动暂停，避免客户端掉线或弹验证时还在反复操作。</p>
+          <div className="form-grid">
+            <Field label="群与群间隔（秒）" hint="每发完一个群随机等待这么久再发下一个">
+              <div className="inline-actions"><input type="number" min={0} max={600} value={guard.groupGapMinSec} onChange={num('groupGapMinSec')} /><span>到</span><input type="number" min={0} max={1800} value={guard.groupGapMaxSec} onChange={num('groupGapMaxSec')} /></div>
+            </Field>
+            <Field label="发送时段" hint="时段外到点的任务顺延到下一个时段开始">
+              <div className="inline-actions"><input type="time" value={guard.activeStart} onChange={event => patchGuard({ activeStart: event.target.value })} /><span>到</span><input type="time" value={guard.activeEnd} onChange={event => patchGuard({ activeEnd: event.target.value })} /></div>
+            </Field>
+            <Field label="每小时最多（次）" hint="发到一个群算一次，0 表示不限"><input type="number" min={0} value={guard.maxPerHour} onChange={num('maxPerHour')} /></Field>
+            <Field label="每天最多（次）" hint="0 表示不限"><input type="number" min={0} value={guard.maxPerDay} onChange={num('maxPerDay')} /></Field>
+            <Field label="单群每天最多（次）" hint="防止重复任务把同一个群刷屏"><input type="number" min={0} value={guard.maxPerGroupPerDay} onChange={num('maxPerGroupPerDay')} /></Field>
+            <Field label="连续失败暂停" hint="连续失败几次后暂停多少分钟，0 次表示不暂停">
+              <div className="inline-actions"><input type="number" min={0} max={20} value={guard.pauseAfterFailures} onChange={num('pauseAfterFailures')} /><span>次 → 暂停</span><input type="number" min={1} value={guard.pauseMinutes} onChange={num('pauseMinutes')} /><span>分钟</span></div>
+            </Field>
+          </div>
+          <label className="toggle-row"><input type="checkbox" checked={guard.varyOpening} onChange={event => patchGuard({ varyOpening: event.target.checked })} />开头随机加一句问候（如“大家早上好！”），让多个群收到的文字不完全一样</label>
         </>}
       <Notice notice={notice} />
       <div className="actions">

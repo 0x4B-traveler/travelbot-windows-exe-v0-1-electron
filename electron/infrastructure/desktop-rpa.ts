@@ -1,13 +1,14 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { RPA_CLIENT_LABELS, type RpaClient, type RpaSettings } from '../../src/domain/ops';
 import type { DesktopRpaGateway } from '../application/ports';
 
 // RPA 适配器：用 PowerShell 调 Win32 接口，把本机的企业微信 / 微信客户端切到前台，
-// Ctrl+F 搜索群名 → 回车进入群聊 → 粘贴内容 → 按发送键。全程通过剪贴板输入，结束后恢复剪贴板。
+// Ctrl+F 搜索群名 → 回车进入群聊 → 粘贴内容 → 按发送键 → 逐张粘贴图片发送。全程通过剪贴板输入，结束后恢复剪贴板。
 // 每一步按键前都会确认前台窗口仍是客户端，被切走就立即停止，避免把内容打到别的窗口里。
+// 防封：每一步等待都带随机抖动，图片之间随机停几秒，节奏接近真人操作。
 
 type ClientProfile = { processes: string[]; windows: Array<{ cls: string; title?: string }> };
 const CLIENT_PROFILES: Record<RpaClient, ClientProfile> = {
@@ -16,7 +17,7 @@ const CLIENT_PROFILES: Record<RpaClient, ClientProfile> = {
   wechat: { processes: ['Weixin', 'WeChat'], windows: [{ cls: 'WeChatMainWndForPC' }, { cls: 'mmui::MainWindow', title: '微信' }, { cls: 'Qt51514QWindowIcon', title: '微信' }] },
 };
 
-type Job = ClientProfile & { action: 'check' | 'send'; clientPath: string; searchHotkey: string; sendKeys: string; autoSend: boolean; delayMs: number; target?: string; text?: string };
+type Job = ClientProfile & { action: 'check' | 'send'; clientPath: string; searchHotkey: string; sendKeys: string; autoSend: boolean; delayMs: number; target?: string; text?: string; images?: string[] };
 type ScriptResult = { ok: boolean; code: string; message: string };
 
 export class PowerShellRpaGateway implements DesktopRpaGateway {
@@ -31,10 +32,10 @@ export class PowerShellRpaGateway implements DesktopRpaGateway {
     return `已找到${RPA_CLIENT_LABELS[settings.client]}主窗口（${result.message}），可以使用 RPA 发送`;
   }
 
-  async sendText(target: string, text: string): Promise<{ sent: boolean }> {
+  async sendText(target: string, text: string, images: string[] = []): Promise<{ sent: boolean }> {
     const settings = this.settings();
     if (!target.trim()) throw new Error('群名称为空，RPA 无法搜索');
-    await this.enqueue(() => this.run(settings, { action: 'send', target: target.trim(), text }));
+    await this.enqueue(() => this.run(settings, { action: 'send', target: target.trim(), text, images: images.filter(path => existsSync(path)) }));
     return { sent: settings.autoSend };
   }
 
@@ -44,7 +45,7 @@ export class PowerShellRpaGateway implements DesktopRpaGateway {
     return next;
   }
 
-  private async run(settings: RpaSettings, input: Pick<Job, 'action' | 'target' | 'text'>): Promise<ScriptResult> {
+  private async run(settings: RpaSettings, input: Pick<Job, 'action' | 'target' | 'text' | 'images'>): Promise<ScriptResult> {
     const label = RPA_CLIENT_LABELS[settings.client];
     if (process.platform !== 'win32') throw new Error('RPA 发送只能在 Windows 电脑上运行');
     mkdirSync(this.workDir, { recursive: true });
@@ -62,8 +63,9 @@ export class PowerShellRpaGateway implements DesktopRpaGateway {
     };
     writeFileSync(jobPath, JSON.stringify(job), 'utf8');
     try {
+      const timeout = 90000 + (input.images?.length ?? 0) * 20000;
       const stdout = await new Promise<string>((resolve, reject) => {
-        execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-STA', '-File', scriptPath, jobPath], { windowsHide: true, timeout: 90000, encoding: 'utf8' }, (error, out, err) => {
+        execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-STA', '-File', scriptPath, jobPath], { windowsHide: true, timeout, encoding: 'utf8' }, (error, out, err) => {
           if (error && !String(out).trim()) reject(new Error((error as any).killed ? 'TIMEOUT' : (String(err).trim() || error.message)));
           else resolve(String(out));
         });
@@ -101,6 +103,7 @@ function Out-Result($ok, $code, $message) {
 }
 
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -168,6 +171,21 @@ function Send-Keys($h, $keys) {
   [System.Windows.Forms.SendKeys]::SendWait($keys)
 }
 
+# Every wait gets random jitter so the rhythm is not machine-regular
+function Wait-Step($factor) {
+  $ms = [int]($delay * $factor * (Get-Random -Minimum 0.7 -Maximum 1.4))
+  Start-Sleep -Milliseconds ([Math]::Max(80, $ms))
+}
+
+function Paste-Image($h, $path) {
+  $bytes = [System.IO.File]::ReadAllBytes($path)
+  $stream = New-Object System.IO.MemoryStream(,$bytes)
+  $img = [System.Drawing.Image]::FromStream($stream)
+  try { [System.Windows.Forms.Clipboard]::SetImage($img) } finally { $img.Dispose(); $stream.Dispose() }
+  Start-Sleep -Milliseconds 200
+  Send-Keys $h '^v'
+}
+
 function Paste-Text($h, $text) {
   [System.Windows.Forms.Clipboard]::SetText([string]$text)
   Start-Sleep -Milliseconds 150
@@ -195,19 +213,32 @@ try {
   try { if ([System.Windows.Forms.Clipboard]::ContainsText()) { $saved = [System.Windows.Forms.Clipboard]::GetText() } } catch { }
   try {
     Focus-Window $h
+    Wait-Step 0.5
     Send-Keys $h ([string]$job.searchHotkey)
-    Start-Sleep -Milliseconds $delay
+    Wait-Step 1
     Send-Keys $h '^a'
     Paste-Text $h $job.target
     # Wait for search results to load
-    Start-Sleep -Milliseconds ([int]($delay * 1.5))
+    Wait-Step 1.5
     Send-Keys $h '{ENTER}'
-    Start-Sleep -Milliseconds $delay
+    Wait-Step 1
     Paste-Text $h $job.text
-    Start-Sleep -Milliseconds ([int]($delay / 2))
+    # Like a person glancing over the text before sending
+    Wait-Step 1.5
     if ($job.autoSend) {
       Send-Keys $h ([string]$job.sendKeys)
-      Start-Sleep -Milliseconds $delay
+      Wait-Step 1
+    }
+    foreach ($path in @($job.images)) {
+      if (-not $path) { continue }
+      # A few seconds between pictures, the way a person picks and sends them
+      Start-Sleep -Milliseconds ([int](Get-Random -Minimum 2500 -Maximum 6000))
+      Paste-Image $h ([string]$path)
+      Wait-Step 1.5
+      if ($job.autoSend) {
+        Send-Keys $h ([string]$job.sendKeys)
+        Wait-Step 1
+      }
     }
   } finally {
     try { if ($null -ne $saved -and $saved.Length -gt 0) { [System.Windows.Forms.Clipboard]::SetText($saved) } else { [System.Windows.Forms.Clipboard]::Clear() } } catch { }

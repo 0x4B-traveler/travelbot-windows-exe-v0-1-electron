@@ -156,12 +156,35 @@ export type RpaSettings = {
   stepDelayMs: number;
   /** 客户端没运行时用来启动它的 exe 路径，可留空。 */
   clientPath: string;
+  guard: RpaGuard;
+};
+/** 防封：按真人的节奏、频率和时段发送，出问题自动停手。 */
+export type RpaGuard = {
+  /** 群与群之间随机间隔（秒）。每一步按键的等待也会自动加随机抖动。 */
+  groupGapMinSec: number;
+  groupGapMaxSec: number;
+  /** 只在这个时段内发送（HH:mm），时段外到点的任务顺延到下一个时段开始。 */
+  activeStart: string;
+  activeEnd: string;
+  /** 每小时 / 每天最多发几次（发到一个群算一次，图片跟着文字不另算）。 */
+  maxPerHour: number;
+  maxPerDay: number;
+  /** 同一个群每天最多发几次。 */
+  maxPerGroupPerDay: number;
+  /** 连续失败几次就暂停 RPA，暂停多少分钟。 */
+  pauseAfterFailures: number;
+  pauseMinutes: number;
+  /** 开头随机加一句问候，避免多个群收到一模一样的文字。 */
+  varyOpening: boolean;
+  /** 每次最多附几张路线素材里的攻略图，0 表示不发图。 */
+  maxImages: number;
 };
 export type SendSettings = { mode: SendMode; rpa: RpaSettings };
-export const DEFAULT_SEND_SETTINGS: SendSettings = { mode: 'api', rpa: { client: 'wecom', autoSend: true, sendKey: 'enter', searchHotkey: '^f', stepDelayMs: 800, clientPath: '' } };
+export const DEFAULT_RPA_GUARD: RpaGuard = { groupGapMinSec: 20, groupGapMaxSec: 60, activeStart: '07:30', activeEnd: '21:30', maxPerHour: 20, maxPerDay: 80, maxPerGroupPerDay: 3, pauseAfterFailures: 3, pauseMinutes: 30, varyOpening: false, maxImages: 3 };
+export const DEFAULT_SEND_SETTINGS: SendSettings = { mode: 'api', rpa: { client: 'wecom', autoSend: true, sendKey: 'enter', searchHotkey: '^f', stepDelayMs: 800, clientPath: '', guard: DEFAULT_RPA_GUARD } };
 /** 客户群在当前发送方式下的发送能力。 */
 export function groupCapabilities(channel: GroupChannel, mode: SendMode): GroupCapabilities {
-  return channel === 'customer' && mode === 'rpa' ? { text: true, image: false, needsConfirm: false } : GROUP_CAPABILITIES[channel];
+  return channel === 'customer' && mode === 'rpa' ? { text: true, image: true, needsConfirm: false } : GROUP_CAPABILITIES[channel];
 }
 
 // ───────── 运行日志 ─────────

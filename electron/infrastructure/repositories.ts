@@ -386,7 +386,13 @@ export class LogRepository {
   }
 
   countSentSince(groupName: string, since: string): number {
-    return (this.db.prepare("SELECT COUNT(*) AS n FROM ops_logs WHERE module = 'WeCom' AND status = 'ok' AND group_name = ? AND time >= ?").get(groupName, since) as unknown as { n: number }).n;
+    return (this.db.prepare("SELECT COUNT(*) AS n FROM ops_logs WHERE module IN ('WeCom', 'RPA') AND status = 'ok' AND group_name = ? AND time >= ?").get(groupName, since) as unknown as { n: number }).n;
+  }
+
+  /** RPA 成功发送的次数（每发到一个群记一条 ok 日志），防封限频用。 */
+  countRpaSentSince(since: string, groupName?: string): number {
+    const sql = `SELECT COUNT(*) AS n FROM ops_logs WHERE module = 'RPA' AND status = 'ok' AND group_name IS NOT NULL AND time >= ?${groupName ? ' AND group_name = ?' : ''}`;
+    return (this.db.prepare(sql).get(...(groupName ? [since, groupName] : [since])) as unknown as { n: number }).n;
   }
 
   prune(before: string) { this.db.prepare('DELETE FROM ops_logs WHERE time < ?').run(before); }

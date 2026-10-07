@@ -139,3 +139,5 @@ textarea.editor-body{min-height:240px}
 .preview-box p{max-height:160px;overflow-y:auto}
 .modal .group-list{max-height:220px;overflow-y:auto}
 .danger-text{color:#ff9a9a}
+.ops-card .sub-title{margin:22px 0 8px;font-size:13px;color:#dce7f5}
+.ops-card .inline-actions input{flex:1;min-width:0}
