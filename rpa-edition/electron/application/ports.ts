@@ -1,4 +1,4 @@
-import type { AccountStatus, ContentChannel, Material, Route, RpaSettings, SendSettings } from '../../src/domain/ops';
+import type { AccountStatus, ContentChannel, MailSettings, Material, Route, RpaSettings, SendSettings } from '../../src/domain/ops';
 import type { RpaSendContext, RpaSendResult } from './rpa-executor';
 
 // Application 层依赖的外部能力（端口）。具体实现放在 Infrastructure，由 main.ts 组装注入，
@@ -18,6 +18,21 @@ export interface DesktopRpaGateway {
 export interface RpaAccountClient {
   check(groupName?: string): Promise<AccountStatus>;
   send(groupName: string, text: string, images: string[], context: RpaSendContext): Promise<RpaSendResult>;
+}
+
+/** 发提醒邮件用的 SMTP 服务器（授权码只在主进程里解密）。 */
+export type MailServer = { host: string; port: number; secure: boolean; user: string; password: string };
+
+export interface MailSender {
+  send(server: MailServer, mail: { to: string[]; subject: string; text: string }): Promise<void>;
+}
+
+export interface MailSettingsStore {
+  get(): MailSettings & { hasPassword: boolean };
+  /** password 留空表示保留已保存的授权码。 */
+  save(settings: MailSettings, password?: string): void;
+  /** 传 password 时用它代替已保存的授权码（保存前先测试）。 */
+  server(password?: string): MailServer | null;
 }
 
 export interface SendSettingsStore {

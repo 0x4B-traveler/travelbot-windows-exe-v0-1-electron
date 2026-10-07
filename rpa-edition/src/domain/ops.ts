@@ -208,6 +208,10 @@ export function resolveAccount(pool: PoolSettings, accountId?: string): RpaAccou
 export type AccountStatus = { ok: boolean; detail: string; client?: string; sentToday?: number; pausedUntil?: string };
 
 export type SendSettings = { rpa: RpaSettings; pool: PoolSettings };
+/** 提醒邮件：客户端弹出安全验证等需要人马上处理的情况，发邮件到这些邮箱（每台电脑各自配置）。 */
+export type MailSettings = { enabled: boolean; host: string; port: number; secure: boolean; user: string; /** 收件人，多个用逗号分隔 */ to: string };
+export type MailSettingsView = MailSettings & { hasPassword: boolean };
+export type MailSettingsInput = MailSettings & { /** 留空表示保留已保存的授权码 */ password?: string };
 export const DEFAULT_RPA_GUARD: RpaGuard = { groupGapMinSec: 60, groupGapMaxSec: 180, activeStart: '07:30', activeEnd: '21:30', maxPerHour: 10, maxPerDay: 40, maxPerGroupPerDay: 3, pauseAfterFailures: 3, pauseMinutes: 30, varyOpening: true, maxImages: 3 };
 export const DEFAULT_SEND_SETTINGS: SendSettings = { rpa: { client: 'wecom', autoSend: true, sendKey: 'enter', searchHotkey: '^f', stepDelayMs: 800, clientPath: '', verifyChat: true, minimizeAfterSend: true, guard: DEFAULT_RPA_GUARD }, pool: DEFAULT_POOL_SETTINGS };
 
@@ -295,6 +299,11 @@ export interface OpsApi {
   'settings.checkAccount'(input: { account: RpaAccount }): Promise<AccountStatus>;
   /** 本机的局域网地址，执行端把它填到主控里。 */
   'settings.agentInfo'(): Promise<{ addresses: string[]; port: number; token: string; listening: boolean; error?: string }>;
+
+  'settings.getMail'(): Promise<MailSettingsView>;
+  'settings.saveMail'(input: MailSettingsInput): Promise<MailSettingsView>;
+  /** 用界面上的设置（未保存也行）发一封测试邮件。 */
+  'settings.testMail'(input: MailSettingsInput): Promise<string>;
 
   'log.list'(query: LogQuery): Promise<LogEntry[]>;
 }

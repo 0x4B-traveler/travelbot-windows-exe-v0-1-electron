@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { call } from '../api';
-import { DEFAULT_AGENT_PORT, DEFAULT_RPA_GUARD, POOL_ROLE_LABELS, RPA_CLIENT_LABELS, type AccountStatus, type PoolRole, type PoolSettings, type RpaAccount, type RpaClient, type RpaGuard, type RpaSettings, type SendSettings } from '../domain/ops';
+import { DEFAULT_AGENT_PORT, DEFAULT_RPA_GUARD, POOL_ROLE_LABELS, RPA_CLIENT_LABELS, type AccountStatus, type MailSettingsView, type PoolRole, type PoolSettings, type RpaAccount, type RpaClient, type RpaGuard, type RpaSettings, type SendSettings } from '../domain/ops';
 import { Card, Field, Notice, useAction } from '../ui';
 
 /** 设置：RPA 发送（桌面客户端、防封规则、账号池），保存后立即生效。不属于核心业务模块。 */
@@ -80,7 +80,36 @@ export function SettingsPage() {
         <button className="primary" disabled={busy || !dirty} onClick={save}>保存</button>
       </div>
     </Card>
+    <MailCard />
   </>;
+}
+
+/** 提醒邮件：客户端弹出安全验证时发邮件，每台电脑（主控、执行端）各自配置。 */
+function MailCard() {
+  const [saved, setSaved] = useState<MailSettingsView | null>(null);
+  const [form, setForm] = useState<MailSettingsView | null>(null);
+  const [password, setPassword] = useState('');
+  const { busy, notice, run } = useAction();
+  useEffect(() => { void call('settings.getMail').then(view => { setSaved(view); setForm(view); }); }, []);
+  if (!form || !saved) return <Card title="提醒邮件"><p className="hint">正在加载…</p></Card>;
+  const patch = (next: Partial<MailSettingsView>) => setForm({ ...form, ...next });
+  const input = () => ({ enabled: form.enabled, host: form.host, port: form.port, secure: form.secure, user: form.user, to: form.to, password });
+  return <Card title="提醒邮件">
+    <p className="hint">客户端弹出安全验证（要求手机扫码）时，除了弹系统通知，还会发邮件到下面的邮箱。验证通常有 5 分钟时限，建议收件邮箱在手机上开着推送。执行端电脑要在它自己的程序里单独配置。</p>
+    <label className="toggle-row"><input type="checkbox" checked={form.enabled} onChange={event => patch({ enabled: event.target.checked })} />启用提醒邮件</label>
+    <div className="form-grid">
+      <Field label="SMTP 服务器" hint="腾讯企业邮 smtp.exmail.qq.com，QQ 邮箱 smtp.qq.com，163 邮箱 smtp.163.com"><input value={form.host} onChange={event => patch({ host: event.target.value })} placeholder="smtp.exmail.qq.com" /></Field>
+      <Field label="端口" hint="465 勾选 SSL；587 不勾选（用 STARTTLS）"><div className="inline-actions"><input type="number" value={form.port} onChange={event => patch({ port: Number(event.target.value) })} /><label className="toggle-row"><input type="checkbox" checked={form.secure} onChange={event => patch({ secure: event.target.checked })} />SSL</label></div></Field>
+      <Field label="发件邮箱"><input value={form.user} onChange={event => patch({ user: event.target.value })} placeholder="name@company.com" /></Field>
+      <Field label="授权码 / 密码" hint="邮箱设置里开启 SMTP 后生成的授权码，加密保存在本机"><input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={saved.hasPassword ? '已保存，留空则不修改' : '填写授权码'} autoComplete="off" /></Field>
+      <Field label="收件人" hint="多个用逗号分隔，可以填企业邮箱和个人邮箱"><input value={form.to} onChange={event => patch({ to: event.target.value })} placeholder="ops@company.com" /></Field>
+    </div>
+    <Notice notice={notice} />
+    <div className="actions">
+      <button className="secondary" disabled={busy} onClick={() => void run(() => call('settings.testMail', input()))}>发测试邮件</button>
+      <button className="primary" disabled={busy} onClick={() => void run(async () => { const view = await call('settings.saveMail', input()); setSaved(view); setForm(view); setPassword(''); return view.enabled ? '已保存，弹出安全验证时会发邮件提醒' : '已保存，提醒邮件未启用'; })}>保存</button>
+    </div>
+  </Card>;
 }
 
 const loadAgent = () => call('settings.agentInfo');

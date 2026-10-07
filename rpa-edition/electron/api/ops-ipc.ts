@@ -1,12 +1,12 @@
 import { ipcMain } from 'electron';
 import type { OpsApi, OpsMethod, OpsResponse } from '../../src/domain/ops';
-import { OpsError, type ContentService, type DashboardService, type GroupService, type LogService, type MaterialService, type RouteService, type SendSettingsService, type TaskService } from '../application/services';
+import { OpsError, type ContentService, type DashboardService, type GroupService, type LogService, type MailAlertService, type MaterialService, type RouteService, type SendSettingsService, type TaskService } from '../application/services';
 
 // API 层：界面只能通过这一个 IPC 通道调用 Service，不能直接访问 SQLite 或桌面客户端。
-export type OpsServices = { dashboard: DashboardService; materials: MaterialService; routes: RouteService; contents: ContentService; tasks: TaskService; groups: GroupService; logs: LogService; sendSettings: SendSettingsService };
+export type OpsServices = { dashboard: DashboardService; materials: MaterialService; routes: RouteService; contents: ContentService; tasks: TaskService; groups: GroupService; logs: LogService; sendSettings: SendSettingsService; mail: MailAlertService };
 
 export function registerOpsApi(services: OpsServices) {
-  const { dashboard, materials, routes, contents, tasks, groups, logs, sendSettings } = services;
+  const { dashboard, materials, routes, contents, tasks, groups, logs, sendSettings, mail } = services;
   const handlers: { [K in OpsMethod]: (args: any) => ReturnType<OpsApi[K]> | Awaited<ReturnType<OpsApi[K]>> } = {
     'dashboard.get': () => dashboard.get(),
 
@@ -53,6 +53,9 @@ export function registerOpsApi(services: OpsServices) {
     'settings.checkRpa': ({ rpa }) => sendSettings.checkRpa(rpa),
     'settings.checkAccount': ({ account }) => sendSettings.checkAccount(account),
     'settings.agentInfo': () => sendSettings.agent(),
+    'settings.getMail': () => mail.get(),
+    'settings.saveMail': input => mail.save(input),
+    'settings.testMail': input => mail.test(input),
 
     'log.list': query => logs.list(query ?? {}),
   };

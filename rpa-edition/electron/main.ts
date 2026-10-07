@@ -10,10 +10,13 @@ import { LocalFileStore } from './infrastructure/file-store';
 import { TemplateContentGenerator } from './infrastructure/template-generator';
 import { PowerShellRpaGateway } from './infrastructure/desktop-rpa';
 import { JsonSendSettingsStore } from './infrastructure/settings-store';
+import { JsonMailSettingsStore } from './infrastructure/mail-store';
+import { SmtpMailSender } from './infrastructure/smtp-mailer';
+import { hostname } from 'node:os';
 import { lanAddresses, RemoteRpaAccount, RpaAgentServer } from './infrastructure/rpa-agent';
 import { RpaExecutor } from './application/rpa-executor';
 import { LOCAL_ACCOUNT_ID, type RpaAccount, type SendSettings } from '../src/domain/ops';
-import { ContentService, DashboardService, DistributionService, GroupService, LogService, MaterialService, RouteService, SendSettingsService, TaskService } from './application/services';
+import { ContentService, DashboardService, DistributionService, GroupService, LogService, MailAlertService, MaterialService, RouteService, SendSettingsService, TaskService } from './application/services';
 import type { RpaAccountClient, WeatherGateway } from './application/ports';
 import { registerOpsApi } from './api/ops-ipc';
 
@@ -138,10 +141,12 @@ function setupOps(database: TravelDatabase) {
   const sendStore = new JsonSendSettingsStore(join(app.getPath('userData'), 'send-settings.json'));
   const rpa = new PowerShellRpaGateway(() => sendStore.get().rpa, join(app.getPath('userData'), 'rpa'));
   // 账号池：本机账号用执行器直接发；远程账号转给局域网里的执行端。本机切成执行端时启动局域网服务
-  // 客户端弹出安全验证时弹系统通知并闪烁任务栏：验证有时限，超时会被退出登录
+  // 客户端弹出安全验证时弹系统通知、闪烁任务栏，并按设置发提醒邮件：验证有时限，超时会被退出登录
+  const mail = new MailAlertService(new JsonMailSettingsStore(join(app.getPath('userData'), 'mail-settings.json')), new SmtpMailSender(), logs, () => hostname());
   const alertLocked = (reason: string) => {
     if (Notification.isSupported()) new Notification({ title: '企业微信要求安全验证，已暂停发送', body: reason }).show();
     mainWindow?.flashFrame(true);
+    void mail.alert('企业微信要求安全验证，已暂停发送', `${reason}\n\n验证通常有 5 分钟时限，超时会被退出登录。请尽快在这台电脑的企业微信窗口里用手机扫码，然后在旅游运营助手的“设置”里点“检测本机客户端”恢复发送。`);
   };
   const localRpa = new RpaExecutor(LOCAL_ACCOUNT_ID, rpa, () => sendStore.get().rpa, logs, alertLocked);
   const accountClient = (account: RpaAccount): RpaAccountClient => account.kind === 'local' ? localRpa : new RemoteRpaAccount(account);
@@ -174,7 +179,7 @@ function setupOps(database: TravelDatabase) {
   contents.migrateTemplates(db);
   tasks.recoverAfterRestart();
   logs.prune();
-  registerOpsApi({ dashboard, materials, routes, contents, tasks, groups, logs, sendSettings });
+  registerOpsApi({ dashboard, materials, routes, contents, tasks, groups, logs, sendSettings, mail });
   logs.write({ module: 'System', action: '启动', status: 'info', message: `旅游运营助手 RPA 版 ${app.getVersion()} 已启动` });
   // 调度器：每 30 秒检查一次到点的运营任务
   const tick = () => { void tasks.runDue().catch(error => logs.write({ module: 'Scheduler', action: '调度', status: 'fail', message: error?.message || String(error) })); };

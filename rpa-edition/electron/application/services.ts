@@ -7,10 +7,10 @@ import {
   type MaterialInput, type MaterialKind, type MaterialQuery, type OpsGroup, type OpsTask, type Route, type RouteInput,
   type RouteQuery, type TaskInput, type TaskRepeat, type TaskRun, type TaskStatus,
   DEFAULT_AGENT_PORT, DEFAULT_SEND_SETTINGS, LOCAL_ACCOUNT_ID, MANUAL_CHAT_PREFIX, RPA_CLIENT_LABELS, resolveAccount,
-  type AccountStatus, type PoolSettings, type RpaAccount, type RpaGuard, type RpaSettings, type SendSettings,
+  type AccountStatus, type MailSettings, type MailSettingsInput, type MailSettingsView, type PoolSettings, type RpaAccount, type RpaGuard, type RpaSettings, type SendSettings,
 } from '../../src/domain/ops';
 import { ContentRepository, GroupRepository, LogRepository, MaterialRepository, RouteRepository, TaskRepository, type StoredTask } from '../infrastructure/repositories';
-import type { ContentGenerator, FilePicker, FileStore, RpaAccountClient, SendSettingsStore, WeatherGateway } from './ports';
+import type { ContentGenerator, FilePicker, MailSender, MailSettingsStore, FileStore, RpaAccountClient, SendSettingsStore, WeatherGateway } from './ports';
 import { nextActiveStart, type RpaExecutor } from './rpa-executor';
 
 // Application 层：每个服务只管自己模块的业务规则，跨模块协作通过调用其他服务，不直接碰别人的表或桌面客户端。
@@ -276,6 +276,63 @@ export class SendSettingsService {
   }
 
   agent(): AgentInfo { return this.agentInfo(); }
+}
+
+// ───────── 提醒邮件 ─────────
+export class MailAlertService {
+  constructor(private readonly store: MailSettingsStore, private readonly mailer: MailSender, private readonly logs: LogService, private readonly machine: () => string) {}
+
+  get(): MailSettingsView { return this.store.get(); }
+
+  save(input: MailSettingsInput): MailSettingsView {
+    const settings = normalizeMail(input);
+    if (settings.enabled && (!settings.host || !settings.user || !settings.to)) fail('请填写 SMTP 服务器、发件邮箱和收件人');
+    if (settings.enabled && !input.password?.trim() && !this.store.get().hasPassword) fail('请填写邮箱授权码');
+    this.store.save(settings, input.password?.trim() || undefined);
+    return this.store.get();
+  }
+
+  async test(input: MailSettingsInput): Promise<string> {
+    const settings = normalizeMail(input);
+    const server = this.serverFor(settings, input.password?.trim());
+    await this.mailer.send(server, { to: recipients(settings.to), subject: '【旅游运营助手】测试邮件', text: `这是一封测试邮件，说明提醒邮件配置正确。\n\n发送电脑：${this.machine()}\n时间：${new Date().toLocaleString('zh-CN', { hour12: false })}` });
+    return `测试邮件已发到 ${recipients(settings.to).join('、')}，请到邮箱查收（也看看垃圾箱）`;
+  }
+
+  /** 发提醒邮件；失败只记日志，不影响发送流程。 */
+  async alert(subject: string, text: string) {
+    const settings = this.store.get();
+    if (!settings.enabled) return;
+    try {
+      const server = this.serverFor(settings);
+      await this.mailer.send(server, { to: recipients(settings.to), subject: `【旅游运营助手】${subject}`, text: `${text}\n\n发送电脑：${this.machine()}\n时间：${new Date().toLocaleString('zh-CN', { hour12: false })}` });
+      this.logs.write({ module: 'System', action: '提醒邮件', status: 'ok', message: `已发到 ${settings.to}：${subject}` });
+    } catch (error: any) {
+      this.logs.write({ module: 'System', action: '提醒邮件', status: 'fail', message: error?.message || String(error) });
+    }
+  }
+
+  private serverFor(settings: MailSettings, password?: string) {
+    if (!settings.host || !settings.user) fail('请填写 SMTP 服务器和发件邮箱');
+    if (!recipients(settings.to).length) fail('请填写收件人邮箱');
+    const stored = this.store.server(password);
+    if (!stored) fail('请填写邮箱授权码');
+    return { ...stored!, host: settings.host, port: settings.port, secure: settings.secure, user: settings.user };
+  }
+}
+
+function recipients(to: string) { return cleanList(String(to ?? '').split(/[,，;；\s]+/)).filter(item => /^[^@\s]+@[^@\s]+$/.test(item)); }
+
+function normalizeMail(input: Partial<MailSettings>): MailSettings {
+  const port = Number(input?.port);
+  return {
+    enabled: Boolean(input?.enabled),
+    host: String(input?.host ?? '').trim(),
+    port: Number.isInteger(port) && port > 0 && port < 65536 ? port : 465,
+    secure: input?.secure ?? true,
+    user: String(input?.user ?? '').trim(),
+    to: recipients(String(input?.to ?? '')).join(', '),
+  };
 }
 
 function normalizeAccount(input: Partial<RpaAccount>): RpaAccount {
