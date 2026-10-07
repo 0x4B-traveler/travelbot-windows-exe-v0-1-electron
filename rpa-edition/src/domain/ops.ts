@@ -31,6 +31,9 @@ export type ImportResult = { added: number; errors: string[] };
 /** 用示例路线给一批群排一周测试任务：群按路线数分组，每天轮换，一周内每个群都会收到所有路线。 */
 export type SamplePlanInput = { name: string; groupIds: string[]; startDate: string; days: number; startTime: string; intervalMinutes: number };
 export type SamplePlanResult = { tasks: number; groups: number; sendsPerDay: number; firstAt: string; lastAt: string };
+/** 给一个群（比如文件传输助手）每天固定时刻各发若干条示例文案，用来测试长期定时发送。 */
+export type SampleDailyInput = { name: string; groupId: string; times: string[]; perSlot: number; gapMinutes: number };
+export type SampleDailyResult = { tasks: number; perDay: number; groupName: string };
 export type SampleDataResult = { name: string; materials: number; images: number; routes: number; contents: number; skipped: number; weatherCities: string[] };
 
 // ───────── 路线管理 ─────────
@@ -267,6 +270,7 @@ export interface OpsApi {
   /** 导入随程序附带的示例数据（素材 + 图片 + 路线 + 已审核群文案），重复导入会跳过已存在的。 */
   'sample.load'(input: { name: string }): Promise<SampleDataResult>;
   'sample.planWeek'(input: SamplePlanInput): Promise<SamplePlanResult>;
+  'sample.planDaily'(input: SampleDailyInput): Promise<SampleDailyResult>;
 
   'route.list'(query: RouteQuery): Promise<Route[]>;
   'route.save'(input: RouteInput): Promise<Route>;

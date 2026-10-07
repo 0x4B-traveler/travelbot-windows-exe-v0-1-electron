@@ -181,7 +181,7 @@ function setupOps(database: TravelDatabase) {
   tasks.recoverAfterRestart();
   logs.prune();
   const sampleRoot = app.isPackaged ? join(process.resourcesPath, 'sample-data') : join(app.getAppPath(), 'sample-data');
-  const samples = new SampleDataService(sampleRoot, materialRepo, files, routes, contents, logs, tasks);
+  const samples = new SampleDataService(sampleRoot, materialRepo, files, routes, contents, logs, tasks, groups);
   registerOpsApi({ dashboard, materials, routes, contents, tasks, groups, logs, sendSettings, mail, samples });
   logs.write({ module: 'System', action: '启动', status: 'info', message: `旅游运营助手 RPA 版 ${app.getVersion()} 已启动` });
   // 调度器：每 30 秒检查一次到点的运营任务

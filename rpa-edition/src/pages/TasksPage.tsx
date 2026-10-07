@@ -25,6 +25,7 @@ function TaskList({ presetContentId, onPresetUsed }: { presetContentId?: string;
   const [tasks, error, reload] = useLoad(() => call('task.list', {}), []);
   const [creating, setCreating] = useState(Boolean(presetContentId));
   const [planning, setPlanning] = useState(false);
+  const [dailyPlanning, setDailyPlanning] = useState(false);
   const [runsOf, setRunsOf] = useState<OpsTask | null>(null);
   const [report, setReport] = useState<DryRunReport | null>(null);
   const { busy, notice, run } = useAction();
@@ -33,7 +34,7 @@ function TaskList({ presetContentId, onPresetUsed }: { presetContentId?: string;
   const act = (action: () => Promise<unknown>, message: string) => void run(async () => { await action(); await reload(); return message; });
 
   return <>
-    <Card title="运营任务" extra={<div className="inline-actions"><button className="refresh-button" onClick={() => void reload()} title="刷新"><span>↻</span></button><button className="secondary" onClick={() => setPlanning(true)}>生成测试排期</button><button className="primary" onClick={() => setCreating(true)}>创建任务</button></div>}>
+    <Card title="运营任务" extra={<div className="inline-actions"><button className="refresh-button" onClick={() => void reload()} title="刷新"><span>↻</span></button><button className="secondary" onClick={() => setDailyPlanning(true)}>单群定时测试</button><button className="secondary" onClick={() => setPlanning(true)}>生成测试排期</button><button className="primary" onClick={() => setCreating(true)}>创建任务</button></div>}>
       <Tabs<Filter> value={filter} onChange={setFilter} options={[{ value: 'all', label: '全部', count: tasks?.length }, ...(['pending', 'running', 'success', 'failed', 'cancelled'] as TaskStatus[]).map(status => ({ value: status, label: TASK_STATUS_LABELS[status], count: count(status) }))]} />
       <Notice notice={notice} />
       {error && <p className="notice error">{error}</p>}
@@ -59,14 +60,62 @@ function TaskList({ presetContentId, onPresetUsed }: { presetContentId?: string;
     {creating && <TaskForm presetContentId={presetContentId} onClose={() => { setCreating(false); onPresetUsed(); }} onCreated={async () => { setCreating(false); onPresetUsed(); await reload(); }} />}
     {runsOf && <RunsDialog task={runsOf} onClose={() => setRunsOf(null)} />}
     {report && <DryRunDialog report={report} onClose={() => setReport(null)} />}
+    {dailyPlanning && <SampleDailyForm onClose={() => setDailyPlanning(false)} onCreated={async message => { setDailyPlanning(false); await reload(); await run(async () => message); }} />}
     {planning && <SamplePlanForm onClose={() => setPlanning(false)} onCreated={async message => { setPlanning(false); await reload(); await run(async () => message); }} />}
   </>;
+}
+
+/** 给一个群（默认文件传输助手）每天固定时刻各发若干条示例文案，测试长期定时发送。 */
+function SampleDailyForm({ onClose, onCreated }: { onClose: () => void; onCreated: (message: string) => Promise<void> }) {
+  const [groups, groupError] = useLoad(() => call('group.list'), []);
+  const [settings] = useLoad(() => call('settings.getSend'), []);
+  const usable = (groups ?? []).filter(group => group.enabled && group.available);
+  const [groupId, setGroupId] = useState('');
+  const [times, setTimes] = useState('06:00, 10:00, 18:00');
+  const [perSlot, setPerSlot] = useState(10);
+  const [gapMinutes, setGapMinutes] = useState(3);
+  const { busy, notice, run } = useAction();
+  const selected = groupId || usable.find(group => group.name === '文件传输助手')?.id || '';
+  const timeList = times.split(/[,，、\s]+/).filter(Boolean);
+  const total = timeList.length * perSlot;
+  const guard = settings?.rpa.guard;
+  const warnings = guard ? [
+    timeList.some(value => value.padStart(5, '0') < guard.activeStart) && `发送时段从 ${guard.activeStart} 开始，早于这个时间的任务会顺延到 ${guard.activeStart}；要准点发，请到设置里把开始时间改早。`,
+    guard.maxPerGroupPerDay > 0 && guard.maxPerGroupPerDay < total && `“每个群每天最多”是 ${guard.maxPerGroupPerDay} 次，这个群每天要发 ${total} 次，超出的会失败；请到设置里改成 ${total} 以上（0 表示不限）。`,
+    guard.maxPerHour > 0 && guard.maxPerHour < perSlot && `“每小时最多”是 ${guard.maxPerHour} 次，少于每个时刻的 ${perSlot} 条。`,
+    guard.maxPerDay > 0 && guard.maxPerDay < total && `“每天最多”是 ${guard.maxPerDay} 次，少于每天的 ${total} 次。`,
+  ].filter(Boolean) as string[] : [];
+
+  return <Modal title="单群定时测试（云南示例数据）" onClose={onClose}>
+    <p className="hint">每天在下面的时刻，给选中的群各发若干条示例路线群文案（轮换路线和天气），每条间隔几分钟。生成的是“每天”重复任务，测试结束后在任务列表里取消。需要先在素材库导入云南示例数据，并在群管理里按名称添加“文件传输助手”。</p>
+    {groupError && <p className="notice error">{groupError}</p>}
+    <Field label="发送到">
+      <select value={selected} onChange={event => setGroupId(event.target.value)}>
+        <option value="">选择群…</option>
+        {usable.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+      </select>
+    </Field>
+    <div className="form-grid">
+      <Field label="每天发送时刻" hint="用逗号分隔"><input value={times} onChange={event => setTimes(event.target.value)} /></Field>
+      <Field label="每个时刻发几条"><input type="number" min={1} max={20} value={perSlot} onChange={event => setPerSlot(Number(event.target.value))} /></Field>
+      <Field label="每条间隔（分钟）"><input type="number" min={1} max={60} value={gapMinutes} onChange={event => setGapMinutes(Number(event.target.value))} /></Field>
+    </div>
+    {warnings.map(text => <p key={text} className="notice error">{text}</p>)}
+    <Notice notice={notice} />
+    <div className="inline-actions end"><button className="secondary" onClick={onClose}>取消</button>
+      <button className="primary" disabled={busy || !selected} onClick={() => void run(async () => {
+        if (!window.confirm(`将创建 ${total} 个每天重复的任务，每天给这个群发 ${total} 条。确定吗？`)) return '';
+        const result = await call('sample.planDaily', { name: 'yunnan', groupId: selected, times: timeList, perSlot, gapMinutes });
+        await onCreated(`已创建 ${result.tasks} 个每天任务：每天给“${result.groupName}”发 ${result.perDay} 条。`);
+      })}>生成</button>
+    </div>
+  </Modal>;
 }
 
 /** 用云南示例路线给选中的群排一周测试任务（每天轮换路线，一周内每个群收到全部路线）。 */
 function SamplePlanForm({ onClose, onCreated }: { onClose: () => void; onCreated: (message: string) => Promise<void> }) {
   const [groups, groupError] = useLoad(() => call('group.list'), []);
-  const usable = (groups ?? []).filter(group => group.enabled && group.available);
+  const usable = (groups ?? []).filter(group => group.enabled && group.available && group.name !== '文件传输助手');
   const tomorrow = new Date(Date.now() + 24 * 3600 * 1000);
   const [startDate, setStartDate] = useState(toLocalInput(tomorrow).slice(0, 10));
   const [days, setDays] = useState(7);

@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { MaterialKind, SampleDataResult, SamplePlanInput, SamplePlanResult } from '../../src/domain/ops';
+import type { MaterialKind, SampleDailyInput, SampleDailyResult, SampleDataResult, SamplePlanInput, SamplePlanResult } from '../../src/domain/ops';
 import type { MaterialRepository } from '../infrastructure/repositories';
 import type { FileStore } from './ports';
-import { OpsError, type ContentService, type LogService, type RouteService, type TaskService } from './services';
+import { OpsError, type ContentService, type GroupService, type LogService, type RouteService, type TaskService } from './services';
 
 // 示例数据：把 sample-data/<name>/seed.json 里的素材（带图片）、路线导入，并为每条路线生成一条已审核的群文案，
 // 方便不录入真实资料就能完整测试“任务 → 发送文字 + 攻略图/路线图 + 天气”。重复导入会跳过同名素材和路线。
@@ -22,6 +22,7 @@ export class SampleDataService {
     private readonly contents: ContentService,
     private readonly logs: LogService,
     private readonly tasks: TaskService,
+    private readonly groups: GroupService,
   ) {}
 
   private seed(name: string): { dir: string; seed: Seed } {
@@ -44,12 +45,7 @@ export class SampleDataService {
     const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input.startDate ?? '');
     const time = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(input.startTime ?? '');
     if (!date || !time) throw new OpsError('请填写开始日期和第一次发送时间');
-    const approved = this.contents.list('approved').concat(this.contents.list('scheduled'), this.contents.list('sent'));
-    const plan = seed.routes.map(item => {
-      const route = this.routes.list({ text: item.name }).find(candidate => candidate.name === item.name);
-      const piece = route && approved.find(candidate => candidate.routeId === route.id && candidate.channel === '群文案');
-      return piece ? { contentId: piece.id, weatherCity: item.weatherCity } : null;
-    }).filter((item): item is { contentId: string; weatherCity: string } => Boolean(item));
+    const plan = this.sampleContents(seed);
     if (!plan.length) throw new OpsError('还没有示例路线的群文案，请先在素材库导入示例数据');
     // 群按顺序轮流分到各组，组数不超过路线数。
     const buckets = Array.from({ length: Math.min(plan.length, groupIds.length) }, () => [] as string[]);
@@ -68,6 +64,43 @@ export class SampleDataService {
     const result = { tasks: runs.length, groups: groupIds.length, sendsPerDay: groupIds.length, firstAt: runs[0].toISOString(), lastAt: runs[runs.length - 1].toISOString() };
     this.logs.write({ module: 'Scheduler', action: '生成测试排期', status: 'ok', message: `${seed.name}：${result.groups} 个群、${days} 天、共 ${result.tasks} 个任务` });
     return result;
+  }
+
+  /** 每天固定时刻给一个群各发 perSlot 条示例文案（每条间隔 gapMinutes 分钟，轮换路线和天气），都是“每天”重复的任务。 */
+  planDaily(input: SampleDailyInput): SampleDailyResult {
+    const { seed } = this.seed(input.name);
+    const group = this.groups.get(input.groupId);
+    const times = [...new Set((input.times ?? []).map(value => value.trim()).filter(Boolean))].sort();
+    if (!times.length) throw new OpsError('请至少填一个发送时刻');
+    const invalid = times.find(value => !/^([01]?\d|2[0-3]):[0-5]\d$/.test(value));
+    if (invalid) throw new OpsError(`时刻“${invalid}”格式应为 HH:mm`);
+    const perSlot = Math.min(20, Math.max(1, Math.round(input.perSlot) || 10));
+    const gap = Math.min(60, Math.max(1, Math.round(input.gapMinutes) || 3));
+    const plan = this.sampleContents(seed);
+    if (!plan.length) throw new OpsError('还没有示例路线的群文案，请先在素材库导入示例数据');
+    const today = new Date();
+    let created = 0;
+    times.forEach(value => {
+      const [hour, minute] = value.split(':').map(Number);
+      for (let index = 0; index < perSlot; index += 1) {
+        const runAt = new Date(today.getFullYear(), today.getMonth(), today.getDate(), hour, minute + index * gap);
+        const item = plan[(created + index) % plan.length];
+        this.tasks.create({ contentId: item.contentId, groupIds: [group.id], runAt: runAt.toISOString(), repeat: 'daily', weatherCity: item.weatherCity });
+      }
+      created += perSlot;
+    });
+    this.logs.write({ module: 'Scheduler', action: '生成定时测试', status: 'ok', message: `“${group.name}”每天 ${times.join('、')} 各发 ${perSlot} 条，共 ${created} 个每天任务` });
+    return { tasks: created, perDay: created, groupName: group.name };
+  }
+
+  /** 示例路线对应的已审核群文案，按 seed 里的路线顺序。 */
+  private sampleContents(seed: Seed): Array<{ contentId: string; weatherCity: string }> {
+    const approved = this.contents.list('approved').concat(this.contents.list('scheduled'), this.contents.list('sent'));
+    return seed.routes.map(item => {
+      const route = this.routes.list({ text: item.name }).find(candidate => candidate.name === item.name);
+      const piece = route && approved.find(candidate => candidate.routeId === route.id && candidate.channel === '群文案');
+      return piece ? { contentId: piece.id, weatherCity: item.weatherCity } : null;
+    }).filter((item): item is { contentId: string; weatherCity: string } => Boolean(item));
   }
 
   async load(name: string): Promise<SampleDataResult> {

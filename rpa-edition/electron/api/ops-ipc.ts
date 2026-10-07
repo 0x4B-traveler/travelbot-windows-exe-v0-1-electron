@@ -21,6 +21,7 @@ export function registerOpsApi(services: OpsServices) {
     'material.imageData': ({ imageId }) => materials.imageData(imageId),
     'sample.load': ({ name }) => samples.load(String(name ?? '')),
     'sample.planWeek': input => samples.planWeek(input),
+    'sample.planDaily': input => samples.planDaily(input),
 
     'route.list': query => routes.list(query ?? {}),
     'route.save': input => routes.save(input),
