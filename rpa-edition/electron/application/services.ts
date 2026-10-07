@@ -230,8 +230,11 @@ export class ContentService {
     return updated;
   }
 
+  /** 按路线里的先后顺序返回素材（SQL 的 IN 查询不保证顺序，发图时路线图要排在前面）。 */
   private routeMaterials(route: Route): Material[] {
-    return this.materials.getMany(cleanList(route.items.map(item => item.materialId ?? '')));
+    const ids = cleanList(route.items.map(item => item.materialId ?? ''));
+    const byId = new Map(this.materials.getMany(ids).map(material => [material.id, material]));
+    return ids.map(id => byId.get(id)).filter((material): material is Material => Boolean(material));
   }
 }
 

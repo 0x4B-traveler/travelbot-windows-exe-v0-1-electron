@@ -27,6 +27,8 @@ export type MaterialQuery = { text?: string; kind?: MaterialKind; city?: string;
 export type MaterialInput = { id?: string; kind: MaterialKind; title: string; body: string; city: string; tags: string[] };
 export type MaterialFacets = { cities: string[]; tags: string[] };
 export type ImportResult = { added: number; errors: string[] };
+/** 导入示例数据的结果；weatherCities 是每条路线建议在运营任务里填的天气城市。 */
+export type SampleDataResult = { name: string; materials: number; images: number; routes: number; contents: number; skipped: number; weatherCities: string[] };
 
 // ───────── 路线管理 ─────────
 export type RouteStatus = 'enabled' | 'disabled';
@@ -259,6 +261,8 @@ export interface OpsApi {
   'material.addImages'(input: { id: string }): Promise<Material>;
   'material.removeImage'(input: { id: string; imageId: string }): Promise<Material>;
   'material.imageData'(input: { imageId: string }): Promise<string | null>;
+  /** 导入随程序附带的示例数据（素材 + 图片 + 路线 + 已审核群文案），重复导入会跳过已存在的。 */
+  'sample.load'(input: { name: string }): Promise<SampleDataResult>;
 
   'route.list'(query: RouteQuery): Promise<Route[]>;
   'route.save'(input: RouteInput): Promise<Route>;

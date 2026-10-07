@@ -38,6 +38,13 @@
       "dist-electron/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "sample-data",
+        "to": "sample-data",
+        "filter": ["**/*"]
+      }
+    ],
     "win": {
       "target": [
         {

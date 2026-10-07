@@ -19,7 +19,12 @@ export function MaterialsPage() {
   const refresh = async () => { await reload(); await reloadFacets(); };
 
   return <>
-    <Card title={`素材（${items?.length ?? 0}）`} extra={<div className="inline-actions"><button className="secondary" onClick={() => setImporting(true)}>导入</button><button className="primary" onClick={() => setEditing({ kind: 'spot', title: '', body: '', city: '', tags: [] })}>新增素材</button></div>}>
+    <Card title={`素材（${items?.length ?? 0}）`} extra={<div className="inline-actions"><button className="secondary" onClick={() => run(async () => {
+        if (!window.confirm('导入云南示例数据？会新增约 37 条素材（含攻略图、路线图）、6 条路线和 6 条已审核的群文案，已存在的会跳过。')) return '';
+        const result = await call('sample.load', { name: 'yunnan' });
+        await refresh();
+        return `已导入${result.name}：素材 ${result.materials} 条、图片 ${result.images} 张、路线 ${result.routes} 条、群文案 ${result.contents} 条${result.skipped ? `，跳过已存在 ${result.skipped} 项` : ''}。建排期任务时天气城市可填：${result.weatherCities.join('；')}`;
+      })}>导入云南示例数据</button><button className="secondary" onClick={() => setImporting(true)}>导入</button><button className="primary" onClick={() => setEditing({ kind: 'spot', title: '', body: '', city: '', tags: [] })}>新增素材</button></div>}>
       <div className="filter-row">
         <input value={text} placeholder="搜索名称、简介、标签" onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') setQuery({ ...query, text }); }} />
         <select value={query.kind ?? ''} onChange={event => setQuery({ ...query, kind: (event.target.value || undefined) as MaterialKind | undefined })}><option value="">全部类型</option>{KINDS.map(kind => <option key={kind} value={kind}>{MATERIAL_KIND_LABELS[kind]}</option>)}</select>

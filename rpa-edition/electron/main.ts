@@ -19,6 +19,7 @@ import { LOCAL_ACCOUNT_ID, type RpaAccount, type SendSettings } from '../src/dom
 import { ContentService, DashboardService, DistributionService, GroupService, LogService, MailAlertService, MaterialService, RouteService, SendSettingsService, TaskService } from './application/services';
 import type { RpaAccountClient, WeatherGateway } from './application/ports';
 import { registerOpsApi } from './api/ops-ipc';
+import { SampleDataService } from './application/sample-data';
 
 // 旅游运营助手 RPA 版：所有发送都通过本机（或局域网执行端）的企业微信 / 微信桌面客户端完成，不调用企业微信官方接口。
 
@@ -179,7 +180,9 @@ function setupOps(database: TravelDatabase) {
   contents.migrateTemplates(db);
   tasks.recoverAfterRestart();
   logs.prune();
-  registerOpsApi({ dashboard, materials, routes, contents, tasks, groups, logs, sendSettings, mail });
+  const sampleRoot = app.isPackaged ? join(process.resourcesPath, 'sample-data') : join(app.getAppPath(), 'sample-data');
+  const samples = new SampleDataService(sampleRoot, materialRepo, files, routes, contents, logs);
+  registerOpsApi({ dashboard, materials, routes, contents, tasks, groups, logs, sendSettings, mail, samples });
   logs.write({ module: 'System', action: '启动', status: 'info', message: `旅游运营助手 RPA 版 ${app.getVersion()} 已启动` });
   // 调度器：每 30 秒检查一次到点的运营任务
   const tick = () => { void tasks.runDue().catch(error => logs.write({ module: 'Scheduler', action: '调度', status: 'fail', message: error?.message || String(error) })); };
