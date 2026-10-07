@@ -51,6 +51,13 @@ export function migrateOpsSchema(db: DatabaseSync) {
   // 素材表来自旧版本，补上“来源”列
   const columns = db.prepare('PRAGMA table_info(content_items)').all() as Array<{ name: string }>;
   if (!columns.some(column => column.name === 'source')) db.exec("ALTER TABLE content_items ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'");
+  // RPA 账号池：群绑定发送账号，日志记录是哪个账号发的（防封限频按账号计算）
+  const addColumn = (table: string, column: string, ddl: string) => {
+    const existing = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!existing.some(item => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  };
+  addColumn('ops_groups', 'account_id', 'account_id TEXT');
+  addColumn('ops_logs', 'account', 'account TEXT');
   db.exec('PRAGMA foreign_keys = ON;');
 }
 
@@ -272,7 +279,7 @@ function toContent(row: ContentRow): ContentPiece {
 }
 
 // ───────── 群 ─────────
-type GroupRow = { id: string; chat_id: string; name: string; channel: GroupChannel; owner: string; member_count: number; enabled: number; match_mode: GroupMatchMode; available: number; last_sent_at: string | null; updated_at: string };
+type GroupRow = { id: string; chat_id: string; name: string; channel: GroupChannel; owner: string; member_count: number; enabled: number; match_mode: GroupMatchMode; available: number; last_sent_at: string | null; account_id: string | null; updated_at: string };
 
 export class GroupRepository {
   constructor(private readonly db: DatabaseSync) {}
@@ -287,17 +294,19 @@ export class GroupRepository {
   }
 
   upsert(group: Omit<OpsGroup, 'todaySent' | 'updatedAt'>) {
-    this.db.prepare(`INSERT INTO ops_groups (id, chat_id, name, channel, owner, member_count, enabled, match_mode, available, last_sent_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    this.db.prepare(`INSERT INTO ops_groups (id, chat_id, name, channel, owner, member_count, enabled, match_mode, available, last_sent_at, account_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET chat_id=excluded.chat_id, name=excluded.name, owner=excluded.owner, member_count=excluded.member_count, enabled=excluded.enabled,
-      match_mode=excluded.match_mode, available=excluded.available, last_sent_at=excluded.last_sent_at, updated_at=excluded.updated_at`)
-      .run(group.id, group.chatId, group.name, group.channel, group.owner, group.memberCount, group.enabled ? 1 : 0, group.matchMode, group.available ? 1 : 0, group.lastSentAt ?? null, now());
+      match_mode=excluded.match_mode, available=excluded.available, last_sent_at=excluded.last_sent_at, account_id=excluded.account_id, updated_at=excluded.updated_at`)
+      .run(group.id, group.chatId, group.name, group.channel, group.owner, group.memberCount, group.enabled ? 1 : 0, group.matchMode, group.available ? 1 : 0, group.lastSentAt ?? null, group.accountId ?? null, now());
   }
 
   markSent(id: string, time: string) { this.db.prepare('UPDATE ops_groups SET last_sent_at = ? WHERE id = ?').run(time, id); }
+
+  delete(id: string) { this.db.prepare('DELETE FROM ops_groups WHERE id = ?').run(id); }
 }
 
 function toGroup(row: GroupRow): Omit<OpsGroup, 'todaySent'> {
-  return { id: row.id, chatId: row.chat_id, name: row.name, channel: row.channel, owner: row.owner, memberCount: row.member_count, enabled: row.enabled === 1, matchMode: row.match_mode, available: row.available === 1, lastSentAt: row.last_sent_at ?? undefined, updatedAt: row.updated_at };
+  return { id: row.id, chatId: row.chat_id, name: row.name, channel: row.channel, owner: row.owner, memberCount: row.member_count, enabled: row.enabled === 1, matchMode: row.match_mode, available: row.available === 1, lastSentAt: row.last_sent_at ?? undefined, accountId: row.account_id ?? undefined, updatedAt: row.updated_at };
 }
 
 // ───────── 任务 ─────────
@@ -363,14 +372,14 @@ function toTask(row: TaskRow): StoredTask {
 }
 
 // ───────── 日志 ─────────
-type LogRow = { id: string; time: string; module: LogEntry['module']; action: string; status: LogEntry['status']; message: string; task_id: string | null; group_name: string | null; attempt: number | null; detail: string | null };
+type LogRow = { id: string; time: string; module: LogEntry['module']; action: string; status: LogEntry['status']; message: string; task_id: string | null; group_name: string | null; attempt: number | null; account: string | null; detail: string | null };
 
 export class LogRepository {
   constructor(private readonly db: DatabaseSync) {}
 
   add(entry: Omit<LogEntry, 'id' | 'time'> & { time?: string }) {
-    this.db.prepare('INSERT INTO ops_logs (id, time, module, action, status, message, task_id, group_name, attempt, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(randomUUID(), entry.time ?? now(), entry.module, entry.action, entry.status, entry.message, entry.taskId ?? null, entry.groupName ?? null, entry.attempt ?? null, entry.detail ?? null);
+    this.db.prepare('INSERT INTO ops_logs (id, time, module, action, status, message, task_id, group_name, attempt, account, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(randomUUID(), entry.time ?? now(), entry.module, entry.action, entry.status, entry.message, entry.taskId ?? null, entry.groupName ?? null, entry.attempt ?? null, entry.account ?? null, entry.detail ?? null);
   }
 
   list(query: LogQuery): LogEntry[] {
@@ -380,11 +389,17 @@ export class LogRepository {
     if (query.taskId) { where.push('task_id = ?'); args.push(query.taskId); }
     args.push(Math.min(Math.max(query.limit ?? 300, 1), 1000));
     const rows = this.db.prepare(`SELECT * FROM ops_logs ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY time DESC LIMIT ?`).all(...args) as unknown as LogRow[];
-    return rows.map(row => ({ id: row.id, time: row.time, module: row.module, action: row.action, status: row.status, message: row.message, taskId: row.task_id ?? undefined, groupName: row.group_name ?? undefined, attempt: row.attempt ?? undefined, detail: row.detail ?? undefined }));
+    return rows.map(row => ({ id: row.id, time: row.time, module: row.module, action: row.action, status: row.status, message: row.message, taskId: row.task_id ?? undefined, groupName: row.group_name ?? undefined, attempt: row.attempt ?? undefined, account: row.account ?? undefined, detail: row.detail ?? undefined }));
   }
 
   countSentSince(groupName: string, since: string): number {
-    return (this.db.prepare("SELECT COUNT(*) AS n FROM ops_logs WHERE module = 'WeCom' AND status = 'ok' AND group_name = ? AND time >= ?").get(groupName, since) as unknown as { n: number }).n;
+    return (this.db.prepare("SELECT COUNT(*) AS n FROM ops_logs WHERE module = 'RPA' AND status = 'ok' AND group_name = ? AND time >= ?").get(groupName, since) as unknown as { n: number }).n;
+  }
+
+  /** 某个 RPA 账号成功发送的次数（每发到一个群记一条 ok 日志），防封限频用。 */
+  countRpaSentSince(account: string, since: string, groupName?: string): number {
+    const sql = `SELECT COUNT(*) AS n FROM ops_logs WHERE module = 'RPA' AND status = 'ok' AND account = ? AND group_name IS NOT NULL AND time >= ?${groupName ? ' AND group_name = ?' : ''}`;
+    return (this.db.prepare(sql).get(...(groupName ? [account, since, groupName] : [account, since])) as unknown as { n: number }).n;
   }
 
   prune(before: string) { this.db.prepare('DELETE FROM ops_logs WHERE time < ?').run(before); }

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-electron/
+work/
+outputs/
+*.tgz
+.env
+.env.*
+*.log
+.DS_Store

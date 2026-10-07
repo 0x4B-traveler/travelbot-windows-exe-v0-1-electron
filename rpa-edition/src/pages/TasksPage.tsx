@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { call, formatTime, toLocalInput } from '../api';
-import { GROUP_CHANNEL_LABELS, TASK_REPEAT_LABELS, TASK_STATUS_LABELS, type DryRunReport, type OpsTask, type TaskInput, type TaskRepeat, type TaskStatus } from '../domain/ops';
+import { TASK_REPEAT_LABELS, TASK_STATUS_LABELS, type DryRunReport, type OpsTask, type TaskInput, type TaskRepeat, type TaskStatus } from '../domain/ops';
 import { ItineraryPanel } from '../ItineraryPanel';
 import { DailyPushPanel } from '../DailyPushPanel';
 import { Card, Empty, Field, Modal, Notice, Pill, Tabs, useAction, useLoad } from '../ui';
@@ -86,10 +86,10 @@ function TaskForm({ presetContentId, onClose, onCreated }: { presetContentId?: s
     {preview && <div className="preview-box"><p>{preview.body}</p></div>}
     <Field group label={`发送群（已选 ${groupIds.length} 个）`}>
       {usable.length ? <div className="group-list">{usable.map(group => <button key={group.id} className={`group-card ${groupIds.includes(group.id) ? 'selected' : ''}`} onClick={() => toggle(group.id)}>
-        <span className="group-avatar">{group.channel === 'bot' ? '群' : '客'}</span>
-        <span className="group-meta"><strong>{group.name}</strong><small>{GROUP_CHANNEL_LABELS[group.channel]}{group.channel === 'customer' ? ' · 需群主确认' : ''}</small></span>
+        <span className="group-avatar">群</span>
+        <span className="group-meta"><strong>{group.name}</strong><small>RPA 直接发送</small></span>
         <span className="group-check">{groupIds.includes(group.id) ? '✓' : ''}</span>
-      </button>)}</div> : <p className="hint">{groupError || '没有可用的群。请先到“群管理”刷新群列表并启用群。'}</p>}
+      </button>)}</div> : <p className="hint">{groupError || '没有可用的群。请先到“群管理”按群名添加群。'}</p>}
     </Field>
     <div className="form-grid">
       <Field label={repeat === 'once' ? '发送时间' : '首次发送时间'}><input type="datetime-local" value={runAt} onChange={event => setRunAt(event.target.value)} /></Field>
@@ -121,10 +121,10 @@ function RunsDialog({ task, onClose }: { task: OpsTask; onClose: () => void }) {
 function DryRunDialog({ report, onClose }: { report: DryRunReport; onClose: () => void }) {
   const passed = report.groups.filter(group => group.ok).length;
   return <Modal title={`预演：${report.contentTitle}`} onClose={onClose} wide>
-    <p className={`notice ${report.ok ? 'ok' : 'error'}`}>{report.ok ? `全部 ${report.groups.length} 个群检查通过。` : `${report.groups.length} 个群中 ${passed} 个检查通过，其余正式执行时会失败。`}这次是预演，没有发出任何消息，也没有在企业微信创建群发任务。</p>
-    <table className="ops-table compact"><thead><tr><th>群</th><th>类型</th><th>结果</th></tr></thead>
+    <p className={`notice ${report.ok ? 'ok' : 'error'}`}>{report.ok ? `全部 ${report.groups.length} 个群检查通过。` : `${report.groups.length} 个群中 ${passed} 个检查通过，其余正式执行时会失败。`}这次是预演，没有发出任何消息。</p>
+    <table className="ops-table compact"><thead><tr><th>群</th><th>结果</th></tr></thead>
       <tbody>{report.groups.map((group, index) => <tr key={index}>
-        <td><strong>{group.name}</strong></td><td>{GROUP_CHANNEL_LABELS[group.channel]}</td>
+        <td><strong>{group.name}</strong></td>
         <td><Pill tone={group.ok ? 'ok' : 'fail'}>{group.ok ? '通过' : '不通过'}</Pill><small>{group.detail}</small></td>
       </tr>)}</tbody>
     </table>

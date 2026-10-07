@@ -1,12 +1,12 @@
 import { ipcMain } from 'electron';
 import type { OpsApi, OpsMethod, OpsResponse } from '../../src/domain/ops';
-import { OpsError, type ContentService, type DashboardService, type GroupService, type LogService, type MaterialService, type RouteService, type TaskService } from '../application/services';
+import { OpsError, type ContentService, type DashboardService, type GroupService, type LogService, type MaterialService, type RouteService, type SendSettingsService, type TaskService } from '../application/services';
 
-// API 层：界面只能通过这一个 IPC 通道调用 Service，不能直接访问 SQLite、企业微信或大模型。
-export type OpsServices = { dashboard: DashboardService; materials: MaterialService; routes: RouteService; contents: ContentService; tasks: TaskService; groups: GroupService; logs: LogService };
+// API 层：界面只能通过这一个 IPC 通道调用 Service，不能直接访问 SQLite 或桌面客户端。
+export type OpsServices = { dashboard: DashboardService; materials: MaterialService; routes: RouteService; contents: ContentService; tasks: TaskService; groups: GroupService; logs: LogService; sendSettings: SendSettingsService };
 
 export function registerOpsApi(services: OpsServices) {
-  const { dashboard, materials, routes, contents, tasks, groups, logs } = services;
+  const { dashboard, materials, routes, contents, tasks, groups, logs, sendSettings } = services;
   const handlers: { [K in OpsMethod]: (args: any) => ReturnType<OpsApi[K]> | Awaited<ReturnType<OpsApi[K]>> } = {
     'dashboard.get': () => dashboard.get(),
 
@@ -43,9 +43,16 @@ export function registerOpsApi(services: OpsServices) {
     'task.dryRun': input => tasks.dryRun(input),
 
     'group.list': () => groups.list(),
-    'group.refresh': () => groups.refresh(),
     'group.update': input => groups.update(input),
     'group.testSend': ({ id, text }) => groups.testSend(id, String(text ?? '')),
+    'group.add': ({ names, accountId }) => groups.add(names, accountId),
+    'group.delete': ({ id }) => groups.delete(id),
+
+    'settings.getSend': () => sendSettings.get(),
+    'settings.saveSend': input => sendSettings.save(input),
+    'settings.checkRpa': ({ rpa }) => sendSettings.checkRpa(rpa),
+    'settings.checkAccount': ({ account }) => sendSettings.checkAccount(account),
+    'settings.agentInfo': () => sendSettings.agent(),
 
     'log.list': query => logs.list(query ?? {}),
   };

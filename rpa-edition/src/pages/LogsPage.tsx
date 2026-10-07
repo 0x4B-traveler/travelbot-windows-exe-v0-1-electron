@@ -3,7 +3,7 @@ import { call } from '../api';
 import type { LogEntry, LogModule, LogQuery, LogStatus } from '../domain/ops';
 import { Card, Empty, Modal, Pill, useLoad } from '../ui';
 
-const MODULES: Array<[LogModule, string]> = [['Scheduler', '调度'], ['Task', '任务'], ['WeCom', '企业微信'], ['Content', '内容'], ['Group', '群'], ['Itinerary', '行程提醒'], ['DailyPush', '每日推送'], ['System', '系统']];
+const MODULES: Array<[LogModule, string]> = [['Scheduler', '调度'], ['Task', '任务'], ['RPA', 'RPA'], ['Content', '内容'], ['Group', '群'], ['Itinerary', '行程提醒'], ['DailyPush', '每日推送'], ['System', '系统']];
 const MODULE_LABEL = Object.fromEntries(MODULES) as Record<LogModule, string>;
 const STATUS: Record<LogStatus, { tone: 'ok' | 'fail' | 'info'; text: string }> = { ok: { tone: 'ok', text: '✓' }, fail: { tone: 'fail', text: '✕' }, info: { tone: 'info', text: '·' } };
 

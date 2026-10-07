@@ -4,13 +4,16 @@ import {
   CONTENT_CHANNELS, CONTENT_STATUS_LABELS, MATERIAL_KIND_LABELS,
   type ContentChannel, type ContentInput, type ContentPiece, type DryRunGroup, type DryRunReport, type ContentStatus, type ContentVersion, type Dashboard, type DashboardTask,
   type GenerateInput, type GroupMatchMode, type ImportResult, type LogEntry, type LogQuery, type Material, type MaterialFacets,
-  type MaterialInput, type MaterialKind, type MaterialQuery, type OpsGroup, type OpsTask, type RefreshResult, type Route, type RouteInput,
+  type MaterialInput, type MaterialKind, type MaterialQuery, type OpsGroup, type OpsTask, type Route, type RouteInput,
   type RouteQuery, type TaskInput, type TaskRepeat, type TaskRun, type TaskStatus,
+  DEFAULT_AGENT_PORT, DEFAULT_SEND_SETTINGS, LOCAL_ACCOUNT_ID, MANUAL_CHAT_PREFIX, RPA_CLIENT_LABELS, resolveAccount,
+  type AccountStatus, type PoolSettings, type RpaAccount, type RpaGuard, type RpaSettings, type SendSettings,
 } from '../../src/domain/ops';
 import { ContentRepository, GroupRepository, LogRepository, MaterialRepository, RouteRepository, TaskRepository, type StoredTask } from '../infrastructure/repositories';
-import type { BotGateway, ContentGenerator, CustomerGroupGateway, FilePicker, FileStore, WeatherGateway } from './ports';
+import type { ContentGenerator, FilePicker, FileStore, RpaAccountClient, SendSettingsStore, WeatherGateway } from './ports';
+import { nextActiveStart, type RpaExecutor } from './rpa-executor';
 
-// Application 层：每个服务只管自己模块的业务规则，跨模块协作通过调用其他服务，不直接碰别人的表或企业微信。
+// Application 层：每个服务只管自己模块的业务规则，跨模块协作通过调用其他服务，不直接碰别人的表或桌面客户端。
 
 export class OpsError extends Error {}
 const fail = (message: string): never => { throw new OpsError(message); };
@@ -25,6 +28,7 @@ export class LogService {
   write(entry: Omit<LogEntry, 'id' | 'time'>) { try { this.repo.add(entry); } catch { /* 日志失败不能影响业务 */ } }
   list(query: LogQuery) { return this.repo.list(query); }
   sentToday(groupName: string) { return this.repo.countSentSince(groupName, startOfLocalDay(new Date()).toISOString()); }
+  rpaSentSince(account: string, since: Date, groupName?: string) { return this.repo.countRpaSentSince(account, since.toISOString(), groupName); }
   /** 只保留最近 60 天的日志。 */
   prune() { this.repo.prune(new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString()); }
 }
@@ -89,6 +93,9 @@ export class MaterialService {
     if (path) this.files.remove(path);
     return this.repo.get(id) ?? fail('素材不存在或已被删除');
   }
+
+  /** 图片在本机的保存路径（RPA 发图用）。 */
+  imageFile(imageId: string): string | null { return this.repo.imagePath(imageId); }
 
   imageData(imageId: string) {
     const path = this.repo.imagePath(imageId);
@@ -186,6 +193,14 @@ export class ContentService {
     if (!['approved', 'scheduled', 'sent'].includes(piece.status)) fail(`内容“${piece.title}”还未审核通过（当前：${CONTENT_STATUS_LABELS[piece.status]}）`);
     return piece;
   }
+  /** 内容关联路线里素材的图片（攻略图、景点图），按路线顺序，RPA 发送时跟在文字后面。 */
+  imagePaths(piece: ContentPiece): string[] {
+    if (!piece.routeId) return [];
+    let route: Route;
+    try { route = this.routes.get(piece.routeId); } catch { return []; }
+    const paths = this.routeMaterials(route).flatMap(material => material.images.map(image => this.materials.imageFile(image.id)));
+    return cleanList(paths.filter((path): path is string => Boolean(path)));
+  }
   markScheduled(id: string) { const piece = this.repo.get(id); if (piece?.status === 'approved') this.repo.update(id, { status: 'scheduled' }); }
   markSent(id: string) { const piece = this.repo.get(id); if (piece && piece.status !== 'sent') this.repo.update(id, { status: 'sent' }); }
   /** 相关任务全部取消且从未发送时，内容回到“已通过”，可以重新排期或修改。 */
@@ -220,50 +235,149 @@ export class ContentService {
   }
 }
 
+// ───────── 发送方式（设置） ─────────
+export type AgentInfo = { addresses: string[]; port: number; token: string; listening: boolean; error?: string };
+
+export class SendSettingsService {
+  constructor(
+    private readonly store: SendSettingsStore,
+    private readonly local: RpaExecutor,
+    private readonly accounts: (account: RpaAccount) => RpaAccountClient,
+    private readonly agentInfo: () => AgentInfo,
+    private readonly logs: LogService,
+    /** 保存后回调：主进程据此启停执行端的局域网服务。 */
+    private readonly onChange: (settings: SendSettings) => void,
+  ) {}
+
+  get(): SendSettings { return this.store.get(); }
+
+  save(input: SendSettings): SendSettings {
+    const previous = this.store.get();
+    const next: SendSettings = { rpa: normalizeRpa(input?.rpa), pool: normalizePool(input?.pool, previous.pool) };
+    this.store.save(next);
+    if (previous.pool.role !== next.pool.role) this.logs.write({ module: 'System', action: '切换本机角色', status: 'info', message: next.pool.role === 'agent' ? `本机改为执行端，监听端口 ${next.pool.agentPort}` : '本机改为主控' });
+    this.onChange(next);
+    return next;
+  }
+
+  async checkRpa(override?: RpaSettings): Promise<string> {
+    const status = await this.local.check(undefined, override ? normalizeRpa(override) : undefined);
+    this.logs.write({ module: 'RPA', action: '检测客户端', status: status.ok ? 'ok' : 'fail', message: status.detail });
+    if (!status.ok) throw new OpsError(status.detail);
+    return status.detail;
+  }
+
+  async checkAccount(input: RpaAccount): Promise<AccountStatus> {
+    const account = normalizeAccount(input);
+    if (account.kind === 'remote' && (!account.host || !account.token)) fail('请填写执行端的 IP 地址和配对口令');
+    const status = await this.accounts(account).check().catch((error: any): AccountStatus => ({ ok: false, detail: error?.message || String(error) }));
+    this.logs.write({ module: 'RPA', action: '测试账号', status: status.ok ? 'ok' : 'fail', message: `${account.name}：${status.detail}` });
+    return status;
+  }
+
+  agent(): AgentInfo { return this.agentInfo(); }
+}
+
+function normalizeAccount(input: Partial<RpaAccount>): RpaAccount {
+  const port = Number(input?.port);
+  const isLocal = input?.id === LOCAL_ACCOUNT_ID;
+  return {
+    id: isLocal ? LOCAL_ACCOUNT_ID : String(input?.id || randomUUID()),
+    name: String(input?.name ?? '').trim() || (isLocal ? '本机' : '未命名账号'),
+    kind: isLocal ? 'local' : 'remote',
+    host: isLocal ? '' : String(input?.host ?? '').trim(),
+    port: isLocal ? 0 : Number.isInteger(port) && port > 0 && port < 65536 ? port : DEFAULT_AGENT_PORT,
+    token: isLocal ? '' : String(input?.token ?? '').trim(),
+    enabled: input?.enabled ?? true,
+  };
+}
+
+function normalizePool(input: Partial<PoolSettings> | undefined, previous: PoolSettings): PoolSettings {
+  const accounts = (Array.isArray(input?.accounts) ? input!.accounts : previous.accounts).map(normalizeAccount);
+  // 本机账号始终存在（可以停用），排在第一个
+  const local = accounts.find(account => account.id === LOCAL_ACCOUNT_ID) ?? normalizeAccount({ id: LOCAL_ACCOUNT_ID });
+  const port = Number(input?.agentPort);
+  return {
+    role: input?.role === 'agent' ? 'agent' : 'master',
+    accounts: [local, ...accounts.filter(account => account.id !== LOCAL_ACCOUNT_ID)],
+    agentPort: Number.isInteger(port) && port > 1024 && port < 65536 ? port : previous.agentPort || DEFAULT_AGENT_PORT,
+    agentToken: String(input?.agentToken ?? '').trim() || previous.agentToken || randomUUID().replace(/-/g, '').slice(0, 16),
+  };
+}
+
+function normalizeRpa(input?: Partial<RpaSettings>): RpaSettings {
+  const base = DEFAULT_SEND_SETTINGS.rpa;
+  const delay = Number(input?.stepDelayMs);
+  return {
+    client: input?.client === 'wechat' ? 'wechat' : 'wecom',
+    autoSend: input?.autoSend ?? base.autoSend,
+    sendKey: input?.sendKey === 'ctrlEnter' ? 'ctrlEnter' : 'enter',
+    searchHotkey: String(input?.searchHotkey ?? '').trim() || base.searchHotkey,
+    stepDelayMs: Number.isFinite(delay) ? Math.min(5000, Math.max(200, Math.round(delay))) : base.stepDelayMs,
+    clientPath: String(input?.clientPath ?? '').trim(),
+    verifyChat: input?.verifyChat ?? base.verifyChat,
+    guard: normalizeGuard(input?.guard),
+  };
+}
+
+function normalizeGuard(input?: Partial<RpaGuard>): RpaGuard {
+  const base = DEFAULT_SEND_SETTINGS.rpa.guard;
+  const int = (value: unknown, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback; };
+  const time = (value: unknown, fallback: string) => { const text = String(value ?? '').trim(); return /^([01]?\d|2[0-3]):[0-5]\d$/.test(text) ? text : fallback; };
+  const gapMin = int(input?.groupGapMinSec, base.groupGapMinSec, 0, 600);
+  return {
+    groupGapMinSec: gapMin,
+    groupGapMaxSec: Math.max(gapMin, int(input?.groupGapMaxSec, base.groupGapMaxSec, 0, 1800)),
+    activeStart: time(input?.activeStart, base.activeStart),
+    activeEnd: time(input?.activeEnd, base.activeEnd),
+    maxPerHour: int(input?.maxPerHour, base.maxPerHour, 0, 1000),
+    maxPerDay: int(input?.maxPerDay, base.maxPerDay, 0, 10000),
+    maxPerGroupPerDay: int(input?.maxPerGroupPerDay, base.maxPerGroupPerDay, 0, 100),
+    pauseAfterFailures: int(input?.pauseAfterFailures, base.pauseAfterFailures, 0, 20),
+    pauseMinutes: int(input?.pauseMinutes, base.pauseMinutes, 1, 24 * 60),
+    varyOpening: input?.varyOpening ?? base.varyOpening,
+    maxImages: int(input?.maxImages, base.maxImages, 0, 9),
+  };
+}
+
 // ───────── 群管理 ─────────
 export class GroupService {
-  constructor(private readonly repo: GroupRepository, private readonly bot: BotGateway, private readonly customer: CustomerGroupGateway, private readonly logs: LogService, private readonly distribution: () => DistributionService) {}
+  constructor(private readonly repo: GroupRepository, private readonly logs: LogService, private readonly distribution: () => DistributionService, private readonly sendSettings: () => SendSettings) {}
 
   list(): OpsGroup[] { return this.repo.list().map(group => ({ ...group, todaySent: this.logs.sentToday(group.name) })); }
   get(id: string): OpsGroup { const group = this.repo.get(id) ?? fail('群不存在或已被删除'); return { ...group, todaySent: this.logs.sentToday(group.name) }; }
   getMany(ids: string[]): OpsGroup[] { return ids.map(id => this.repo.get(id)).filter((group): group is NonNullable<typeof group> => Boolean(group)).map(group => ({ ...group, todaySent: 0 })); }
   markSent(id: string) { this.repo.markSent(id, nowIso()); }
 
-  /** 从企业微信拉取群列表并与本地合并：按 chatId 匹配；“按群名匹配”的群在 chatId 变化后也能接上。 */
-  async refresh(): Promise<RefreshResult> {
-    const warnings: string[] = [];
-    const fetched: Array<{ chatId: string; name: string; channel: 'bot' | 'customer'; owner: string; memberCount: number }> = [];
-    let botOk = false; let customerOk = false;
-    try { (await this.bot.listGroups()).forEach(group => fetched.push({ ...group, channel: 'bot', owner: '', memberCount: 0 })); botOk = true; }
-    catch (error: any) { warnings.push(`机器人群聊加载失败：${error?.message || error}`); }
-    if (this.customer.configured()) {
-      const sender = this.customer.defaultSender();
-      try { (await this.customer.listGroups(sender ? [sender] : [])).forEach(group => fetched.push({ ...group, channel: 'customer' })); customerOk = true; }
-      catch (error: any) { warnings.push(`客户群加载失败：${error?.message || error}`); }
-    } else warnings.push('还没有配置客户群群发（企业 ID、Secret、发送人），只加载了机器人群聊');
-
-    const existing = this.repo.list();
-    const matched = new Set<string>();
-    let added = 0; let updated = 0;
-    for (const item of fetched) {
-      const sameChannel = existing.filter(group => group.channel === item.channel && !matched.has(group.id));
-      const found = sameChannel.find(group => group.chatId === item.chatId) ?? sameChannel.find(group => group.matchMode === 'name' && group.name === item.name);
-      if (found) { matched.add(found.id); this.repo.upsert({ ...found, chatId: item.chatId, name: item.name, owner: item.owner, memberCount: item.memberCount, available: true }); updated += 1; }
-      else { const id = randomUUID(); matched.add(id); this.repo.upsert({ id, chatId: item.chatId, name: item.name, channel: item.channel, owner: item.owner, memberCount: item.memberCount, enabled: true, matchMode: 'id', available: true }); added += 1; }
-    }
-    let missing = 0;
-    for (const group of existing) {
-      const loaded = group.channel === 'bot' ? botOk : customerOk;
-      if (!matched.has(group.id) && loaded && group.available) { this.repo.upsert({ ...group, available: false }); missing += 1; }
-    }
-    this.logs.write({ module: 'Group', action: '刷新群列表', status: warnings.length && !fetched.length ? 'fail' : 'ok', message: `新增 ${added}，更新 ${updated}，找不到 ${missing}`, detail: warnings.join('\n') || undefined });
-    return { added, updated, missing, warnings };
+  update(input: { id: string; enabled?: boolean; matchMode?: GroupMatchMode; accountId?: string }): OpsGroup {
+    const group = this.repo.get(input.id) ?? fail('群不存在或已被删除');
+    const accountId = input.accountId === undefined ? group.accountId : (input.accountId || undefined);
+    if (accountId && !this.sendSettings().pool.accounts.some(account => account.id === accountId)) fail('账号不存在，请先在“设置 → 账号池”里添加');
+    this.repo.upsert({ ...group, enabled: input.enabled ?? group.enabled, accountId });
+    return this.get(group.id);
   }
 
-  update(input: { id: string; enabled?: boolean; matchMode?: GroupMatchMode }): OpsGroup {
-    const group = this.repo.get(input.id) ?? fail('群不存在或已被删除');
-    this.repo.upsert({ ...group, enabled: input.enabled ?? group.enabled, matchMode: input.matchMode === 'name' || input.matchMode === 'id' ? input.matchMode : group.matchMode });
-    return this.get(group.id);
+  /** 按群名添加群：发送时在客户端里搜索这个群名，群名要和客户端里显示的一致。 */
+  add(names: string[], accountId?: string): OpsGroup[] {
+    const wanted = cleanList(Array.isArray(names) ? names.map(String) : []);
+    if (!wanted.length) fail('请填写群名称');
+    const existing = new Set(this.repo.list().map(group => group.name));
+    const added: OpsGroup[] = [];
+    for (const name of wanted) {
+      if (existing.has(name)) continue;
+      const id = randomUUID();
+      this.repo.upsert({ id, chatId: `${MANUAL_CHAT_PREFIX}${id}`, name, channel: 'customer', owner: '', memberCount: 0, enabled: true, matchMode: 'name', available: true, accountId: accountId || undefined });
+      existing.add(name);
+      added.push(this.get(id));
+    }
+    this.logs.write({ module: 'Group', action: '添加群', status: 'ok', message: `新增 ${added.length} 个，跳过已存在 ${wanted.length - added.length} 个`, detail: added.map(group => group.name).join('、') || undefined });
+    return added;
+  }
+
+  delete(id: string) {
+    const group = this.repo.get(id) ?? fail('群不存在或已被删除');
+    this.repo.delete(id);
+    this.logs.write({ module: 'Group', action: '删除群', status: 'ok', message: group.name });
   }
 
   async testSend(id: string, text: string): Promise<string> {
@@ -275,67 +389,69 @@ export class GroupService {
   }
 }
 
-// ───────── 分发适配（怎么发） ─────────
+// ───────── 分发适配（怎么发：按群绑定的账号，交给本机或局域网执行端的客户端发） ─────────
 export type SendResult = { ok: boolean; detail: string };
 
 export class DistributionService {
-  constructor(private readonly bot: BotGateway, private readonly customer: CustomerGroupGateway, private readonly logs: LogService, private readonly onSent: (groupId: string) => void) {}
+  constructor(
+    /** 账号池里每个账号的发送入口：本机账号是 RpaExecutor，远程账号是执行端的局域网客户端。 */
+    private readonly accounts: (account: RpaAccount) => RpaAccountClient,
+    private readonly sendSettings: () => SendSettings,
+    private readonly logs: LogService,
+    private readonly onSent: (groupId: string) => void,
+  ) {}
 
-  /** 预演：做发送前的全部检查，客户群还会用只读接口确认凭证、可信 IP 和群是否还在，但不创建群发任务。 */
-  async dryRun(groups: OpsGroup[], context: { taskId?: string }): Promise<DryRunGroup[]> {
+  /** 群由哪个账号发；找不到时给出原因。 */
+  private accountFor(group: OpsGroup): { account: RpaAccount } | { error: string } {
+    const pool = this.sendSettings().pool;
+    const account = resolveAccount(pool, group.accountId);
+    if (account) return { account };
+    return { error: group.accountId && pool.accounts.some(item => item.id === group.accountId) ? '绑定的发送账号已停用，请在群管理换一个账号' : '账号池里没有可用的发送账号（设置 → 账号池）' };
+  }
+
+  /** 预演：检查账号、客户端窗口和防封规则，但不发送。 */
+  async dryRun(groups: OpsGroup[], context: { taskId?: string; imageCount?: number }): Promise<DryRunGroup[]> {
     const results: DryRunGroup[] = [];
-    let botChats: Set<string> | null | Error = null;
-    const customerChats = new Map<string, Set<string> | Error>();
+    const settings = this.sendSettings();
     for (const group of groups) {
       const result = (ok: boolean, detail: string) => {
         results.push({ name: group.name, channel: group.channel, ok, detail });
-        this.logs.write({ module: 'WeCom', action: '预演', status: ok ? 'info' : 'fail', taskId: context.taskId, groupName: group.name, message: `【预演，未发送】${detail}` });
+        this.logs.write({ module: 'RPA', action: '预演', status: ok ? 'info' : 'fail', taskId: context.taskId, groupName: group.name, message: `【预演，未发送】${detail}` });
       };
       if (!group.enabled) { result(false, '群已停用，正式执行时会跳过'); continue; }
-      if (!group.available) { result(false, '找不到群（最近一次刷新时已不在列表中），请到群管理刷新'); continue; }
-      if (group.channel === 'bot') {
-        if (botChats === null) botChats = await this.bot.listGroups().then(list => new Set(list.map(item => item.chatId)), error => (error instanceof Error ? error : new Error(String(error))));
-        if (botChats instanceof Error) result(false, `机器人会话列表加载失败：${botChats.message}`);
-        else if (!botChats.has(group.chatId)) result(false, '机器人当前的会话列表里没有这个群');
-        else result(true, '机器人在群里，正式执行时会直接发出');
-        continue;
-      }
-      if (!this.customer.configured()) { result(false, '还没有配置客户群群发（设置 → 客户群群发）'); continue; }
-      const sender = group.owner || this.customer.defaultSender();
-      if (!sender) { result(false, '缺少群主 userid'); continue; }
-      if (!customerChats.has(sender)) customerChats.set(sender, await this.customer.listGroups([sender]).then(list => new Set(list.map(item => item.chatId)), error => (error instanceof Error ? error : new Error(String(error)))));
-      const chats = customerChats.get(sender)!;
-      if (chats instanceof Error) result(false, `企业微信接口校验失败：${chats.message}`);
-      else if (!chats.has(group.chatId)) result(false, `群主 ${sender} 名下找不到这个客户群`);
-      else result(true, `接口和群都正常，正式执行时会创建群发任务，由群主 ${sender} 在企业微信确认后发出`);
+      const picked = this.accountFor(group);
+      if ('error' in picked) { result(false, picked.error); continue; }
+      const status = await this.accounts(picked.account).check(group.name).catch((error: any): AccountStatus => ({ ok: false, detail: error?.message || String(error) }));
+      if (!status.ok) { result(false, `账号“${picked.account.name}”：${status.detail}`); continue; }
+      const images = Math.min(context.imageCount ?? 0, settings.rpa.guard.maxImages);
+      result(true, `账号“${picked.account.name}”正常，正式执行时会在${status.client ?? '客户端'}里搜索“${group.name}”并发送${images ? `文字和 ${images} 张图` : '文字'}`);
     }
     return results;
   }
 
-  async send(group: OpsGroup, text: string, context: { taskId?: string; attempt?: number; action?: string }): Promise<SendResult> {
-    const base = { module: 'WeCom' as const, taskId: context.taskId, groupName: group.name, attempt: context.attempt };
+  /** 当前不在发送时段时，返回下一个时段开始的时间，供运营任务顺延（时段以主控的防封设置为准）。 */
+  rpaDeferUntil(now: Date): Date | null {
+    return nextActiveStart(this.sendSettings().rpa.guard, now);
+  }
+
+  /** 按群绑定的账号发。本机账号的日志由执行器写；远程账号这里再记一条，主控也能看到结果。 */
+  async send(group: OpsGroup, text: string, context: { taskId?: string; attempt?: number; action?: string; images?: string[]; paced?: boolean }): Promise<SendResult> {
     const action = context.action ?? '发送文本';
-    if (!group.enabled) { this.logs.write({ ...base, action, status: 'fail', message: '群已停用，跳过' }); return { ok: false, detail: `${group.name}：群已停用` }; }
-    if (!group.available) { this.logs.write({ ...base, action, status: 'fail', message: '找不到群（最近一次刷新时已不在列表中）' }); return { ok: false, detail: `${group.name}：找不到群，请到群管理刷新` }; }
+    const base = { module: 'RPA' as const, taskId: context.taskId, groupName: group.name, attempt: context.attempt, action };
+    if (!group.enabled) { this.logs.write({ ...base, status: 'fail', message: '群已停用，跳过' }); return { ok: false, detail: `${group.name}：群已停用` }; }
+    const picked = this.accountFor(group);
+    if ('error' in picked) { this.logs.write({ ...base, status: 'fail', message: picked.error }); return { ok: false, detail: `${group.name}：${picked.error}` }; }
+    const { account } = picked;
+    const remote = account.kind === 'remote';
     try {
-      if (group.channel === 'bot') {
-        await this.bot.sendText(group.chatId, text);
-        this.logs.write({ ...base, action, status: 'ok', message: '机器人已发送' });
-        this.onSent(group.id);
-        return { ok: true, detail: `${group.name}：已发送` };
-      }
-      if (!this.customer.configured()) throw new Error('还没有配置客户群群发（设置 → 客户群群发）');
-      const sender = group.owner || this.customer.defaultSender();
-      if (!sender) throw new Error('缺少群主 userid');
-      const { msgid, failList } = await this.customer.createGroupMessage({ sender, chatIds: [group.chatId], content: text });
-      if (failList.includes(group.chatId)) throw new Error('企业微信拒绝向该客户群创建群发任务');
-      this.logs.write({ ...base, action, status: 'ok', message: `已创建群发任务，等待群主 ${sender} 在企业微信确认`, detail: `msgid=${msgid}` });
+      const result = await this.accounts(account).send(group.name, text, context.images ?? [], { taskId: context.taskId, attempt: context.attempt, action, paced: context.paced ?? Boolean(context.taskId) });
+      if (remote) this.logs.write({ ...base, account: account.id, status: 'ok', message: `账号“${account.name}”：${result.detail}` });
       this.onSent(group.id);
-      return { ok: true, detail: `${group.name}：已创建群发任务，等待群主确认` };
+      return { ok: true, detail: `${group.name}：${remote ? `账号“${account.name}”` : ''}${result.detail}` };
     } catch (error: any) {
       const message = error?.message || String(error);
-      this.logs.write({ ...base, action, status: 'fail', message });
-      return { ok: false, detail: `${group.name}：${message}` };
+      if (remote) this.logs.write({ ...base, account: account.id, status: 'fail', message: `账号“${account.name}”：${message}` });
+      return { ok: false, detail: `${group.name}：${remote ? `账号“${account.name}”：` : ''}${message}` };
     }
   }
 }
@@ -423,8 +539,8 @@ export class TaskService {
     const text = await this.compose(content.body, draft.weatherCity, new Date(), draft.id);
     const groups = this.groups.getMany(draft.groupIds);
     const missing = draft.groupIds.length - groups.length;
-    const results = await this.distribution.dryRun(groups, { taskId: draft.id });
-    for (let index = 0; index < missing; index += 1) results.push({ name: '（已删除的群）', channel: 'bot', ok: false, detail: '群已被删除' });
+    const results = await this.distribution.dryRun(groups, { taskId: draft.id, imageCount: this.contents.imagePaths(content).length });
+    for (let index = 0; index < missing; index += 1) results.push({ name: '（已删除的群）', channel: 'customer', ok: false, detail: '群已被删除' });
     const ok = results.every(item => item.ok);
     this.logs.write({ module: 'Task', action: '预演', status: ok ? 'ok' : 'fail', taskId: draft.id, message: `【预演，未发送】“${content.title}”：${results.filter(item => item.ok).length}/${results.length} 个群检查通过` });
     return { contentTitle: content.title, text, groups: results, ok, checkedAt: nowIso() };
@@ -467,25 +583,35 @@ export class TaskService {
     const isRetry = task.retryGroupIds.length > 0 || task.attempts > 0;
     if (!isRetry && now.getTime() - dueAt.getTime() > MISSED_AFTER_MS) return this.skipMissed(task, dueAt, now);
 
+    const targetIds = task.retryGroupIds.length ? task.retryGroupIds : task.groupIds;
+    const groups = this.groups.getMany(targetIds);
+    // RPA 防封：时段外或熔断暂停中，整个任务顺延，不算失败、不占重试次数
+    const deferUntil = groups.length ? this.distribution.rpaDeferUntil(now) : null;
+    if (deferUntil) {
+      this.repo.save({ ...task, status: 'pending', nextRunAt: deferUntil.toISOString(), lastResult: `RPA 防封：顺延到 ${fmt(deferUntil)}` });
+      this.logs.write({ module: 'RPA', action: '顺延任务', status: 'info', taskId: task.id, message: `当前不在 RPA 发送时段或暂停中，任务顺延到 ${fmt(deferUntil)}` });
+      return;
+    }
+
     this.repo.save({ ...task, status: 'running' });
     const attempt = task.attempts + 1;
     const startedAt = new Date();
     this.logs.write({ module: 'Scheduler', action: '开始执行', status: 'info', taskId: task.id, attempt, message: `第 ${attempt} 次执行` });
 
     let text = '';
+    let images: string[] = [];
     try {
       const content = this.contents.assertSendable(task.contentId);
       text = await this.compose(content.body, task.weatherCity, now, task.id);
+      images = this.contents.imagePaths(content);
     } catch (error: any) {
       return this.finish(task, startedAt, attempt, [], [error?.message || String(error)], task.groupIds);
     }
 
-    const targetIds = task.retryGroupIds.length ? task.retryGroupIds : task.groupIds;
-    const groups = this.groups.getMany(targetIds);
     const missing = targetIds.filter(id => !groups.some(group => group.id === id));
     const okDetails: string[] = []; const failDetails: string[] = missing.map(() => '群已被删除'); const failedIds: string[] = [];
     for (const group of groups) {
-      const result = await this.distribution.send(group, text, { taskId: task.id, attempt });
+      const result = await this.distribution.send(group, text, { taskId: task.id, attempt, images });
       if (result.ok) okDetails.push(result.detail); else { failDetails.push(result.detail); failedIds.push(group.id); }
     }
     this.finish(task, startedAt, attempt, okDetails, failDetails, failedIds);
