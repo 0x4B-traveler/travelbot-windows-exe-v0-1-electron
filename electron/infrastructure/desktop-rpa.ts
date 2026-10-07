@@ -93,6 +93,7 @@ function describe(code: string, message: string, label: string): string {
     case 'NOT_RUNNING': return `没有找到正在运行的${label}，请先打开并登录${label}（也可以在设置里填写客户端路径，让程序自动启动）`;
     case 'NO_WINDOW': return `${label}已运行，但找不到主窗口，请确认已登录`;
     case 'WRONG_CHAT': return `进群后核对群名没通过（识别到的标题：${message || '无'}），可能搜到了别的群或群名有变化，已停止，内容没有粘贴。截图在 RPA 目录的 chat-title.png`;
+    case 'SEARCH_STUCK': return `搜索群名后没能进入聊天（搜索框里还是群名），可能搜不到这个群或结果加载太慢，已停止，内容没有粘贴。截图在 RPA 目录的 chat-title.png`;
     case 'OCR_UNAVAILABLE': return '本机没有可用的中文 OCR，无法核对群名，已停止。可以在 RPA 设置里关闭“发送前核对群名”';
     case 'FOCUS_LOST': return `无法把${label}切到前台，或操作途中前台被切走（电脑锁屏、有弹窗或有人在操作），已停止，本次没有确认发出`;
     default: return `RPA 操作${label}失败：${message || code}`;
@@ -172,14 +173,20 @@ function Get-Lcs($a, $b) {
 }
 
 function Test-TitleMatch($target, $line) {
+  $raw = ([string]$line).Trim()
   $t = Normalize-Name $target
-  $l = Normalize-Name $line
+  # The title may end with the member count, e.g. "(23)"
+  $l = Normalize-Name ($raw -replace '[\(（]\s*\d+\s*[\)）]\s*$', '')
   if (-not $t -or -not $l) { return $false }
-  if ($l.Contains($t)) { return $true }
+  if ($l -eq $t) { return $true }
+  # Tags shown after the name (external contact / all-staff group); anything else after it is a different chat,
+  # e.g. searching "Team" must not accept "Team 2"
+  if ($l.StartsWith($t) -and ($l.Substring($t.Length) -match '^(微信|外部|全员)+$')) { return $true }
   # Long names are cut off with an ellipsis in the title bar
-  if ($l.Length -ge 4 -and $t.StartsWith($l)) { return $true }
-  # Tolerate an OCR slip of one or two characters
-  return ((Get-Lcs $t $l) / $t.Length) -ge 0.8
+  if ($raw -match '(\.{2,}|…)$' -and $l.Length -ge 4 -and $t.StartsWith($l)) { return $true }
+  # Tolerate an OCR slip of one character in a name of the same length
+  if ([Math]::Abs($t.Length - $l.Length) -gt 1) { return $false }
+  return ((Get-Lcs $t $l) / [Math]::Max($t.Length, $l.Length)) -ge 0.8
 }
 
 # Text lines in the chat title bar: the top strip of the window, right of the session list
@@ -212,20 +219,30 @@ function Read-ChatTitle($h, $workDir) {
   } finally { $stream.Dispose() }
   # The search box and session list sit in the left column (under ~280 logical px); the chat title starts right of it
   $minX = 280 * $scale * $zoom
+  # The search box sits in the top ~56 logical px of the left column
+  $searchMaxY = 56 * $scale * $zoom
   $lines = @()
+  $searchLines = @()
   foreach ($line in $result.Lines) {
     $words = @($line.Words)
     if (-not $words.Count) { continue }
     $left = ($words | ForEach-Object { $_.BoundingRect.X } | Measure-Object -Minimum).Minimum
-    if ($left -lt $minX) { continue }
-    $lines += (($words | ForEach-Object { $_.Text }) -join '')
+    $top = ($words | ForEach-Object { $_.BoundingRect.Y } | Measure-Object -Minimum).Minimum
+    $text = (($words | ForEach-Object { $_.Text }) -join '')
+    if ($left -ge $minX) { $lines += $text } elseif ($top -lt $searchMaxY) { $searchLines += $text }
   }
-  return $lines
+  return @{ title = $lines; search = $searchLines }
 }
 
 function Assert-ChatTitle($h, $target, $workDir) {
-  $lines = @(Read-ChatTitle $h $workDir)
-  foreach ($line in $lines) { if (Test-TitleMatch $target $line) { return } }
+  $read = Read-ChatTitle $h $workDir
+  $lines = @($read.title)
+  # Opening a chat clears the search box. If it still holds the name, Enter did not open anything
+  # and the focus is still in the search box, even when the chat shown happens to be the right one
+  # Loose on purpose (the search box text is small and often misread): a false alarm only stops the send
+  $t = Normalize-Name $target
+  foreach ($line in @($read.search)) { $l = Normalize-Name $line; if ($t -and $l -and ((Get-Lcs $t $l) / $t.Length) -ge 0.7) { throw ('SEARCH_STUCK|' + ($lines -join ' / ')) } }
+  foreach ($line in $lines) { if (Test-TitleMatch $target $line) { return $line } }
   throw ('WRONG_CHAT|' + ($lines -join ' / '))
 }
 
@@ -334,10 +351,14 @@ try {
     Paste-Text $h $job.target
     # Wait for search results to load
     Wait-Step 1.5
+    # WeCom shows the results with nothing selected, so Enter alone does nothing: select the first result first
+    Send-Keys $h '{DOWN}'
+    Wait-Step 0.5
     Send-Keys $h '{ENTER}'
     Wait-Step 1
     # Make sure the opened chat is the target group before typing anything into it
-    if ($job.verifyChat) { Assert-ChatTitle $h ([string]$job.target) ([string]$job.workDir) }
+    $title = ''
+    if ($job.verifyChat) { $title = Assert-ChatTitle $h ([string]$job.target) ([string]$job.workDir) }
     Paste-Text $h $job.text
     # Like a person glancing over the text before sending
     Wait-Step 1.5
@@ -359,7 +380,7 @@ try {
   } finally {
     try { if ($null -ne $saved -and $saved.Length -gt 0) { [System.Windows.Forms.Clipboard]::SetText($saved) } else { [System.Windows.Forms.Clipboard]::Clear() } } catch { }
   }
-  Out-Result $true 'SENT' ''
+  Out-Result $true 'SENT' $title
 } catch {
   $message = $_.Exception.Message
   if ($message -match '^([A-Z_]+)(\|(.*))?$') { Out-Result $false $Matches[1] $Matches[3] } else { Out-Result $false 'ERROR' $message }
