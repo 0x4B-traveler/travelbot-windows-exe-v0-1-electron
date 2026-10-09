@@ -60,7 +60,7 @@ function applyLaunchAtLogin(enabled: boolean) {
   app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] });
 }
 function createWindow() {
-  mainWindow = new BrowserWindow({ title: '旅游运营助手（RPA 版）', show: !startHidden, width: 1280, height: 820, minWidth: 1080, minHeight: 680, backgroundColor: '#08111f', webPreferences: { preload: join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
+  mainWindow = new BrowserWindow({ title: '旅游运营助手（RPA 版）', show: !startHidden, width: 1280, height: 820, minWidth: 1080, minHeight: 680, backgroundColor: '#14100c', webPreferences: { preload: join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
   mainWindow.removeMenu();
   mainWindow.on('close', (event) => { if (!quitting) { event.preventDefault(); mainWindow?.hide(); } });
   const devUrl = process.env.VITE_DEV_SERVER_URL;
