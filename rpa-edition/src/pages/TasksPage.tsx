@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { call, formatTime, toLocalInput } from '../api';
-import { TASK_REPEAT_LABELS, TASK_STATUS_LABELS, type SamplePlanResult, type DryRunReport, type OpsTask, type TaskInput, type TaskRepeat, type TaskStatus } from '../domain/ops';
+import { SELF_CHAT_NAME, TASK_REPEAT_LABELS, TASK_STATUS_LABELS, type SamplePlanResult, type DryRunReport, type OpsTask, type TaskInput, type TaskRepeat, type TaskStatus } from '../domain/ops';
 import { ItineraryPanel } from '../ItineraryPanel';
 import { DailyPushPanel } from '../DailyPushPanel';
 import { Card, Empty, Field, Modal, Notice, Pill, Tabs, useAction, useLoad } from '../ui';
@@ -76,14 +76,15 @@ function SampleDailyForm({ onClose, onCreated }: { onClose: () => void; onCreate
   const [gapMinutes, setGapMinutes] = useState(3);
   const { busy, notice, run } = useAction();
   const selected = groupId || usable.find(group => group.name === '文件传输助手')?.id || '';
+  const selectedName = usable.find(group => group.id === selected)?.name;
   const timeList = times.split(/[,，、\s]+/).filter(Boolean);
   const total = timeList.length * perSlot;
   const guard = settings?.rpa.guard;
   const warnings = guard ? [
     timeList.some(value => value.padStart(5, '0') < guard.activeStart) && `发送时段从 ${guard.activeStart} 开始，早于这个时间的任务会顺延到 ${guard.activeStart}；要准点发，请到设置里把开始时间改早。`,
-    guard.maxPerGroupPerDay > 0 && guard.maxPerGroupPerDay < total && `“每个群每天最多”是 ${guard.maxPerGroupPerDay} 次，这个群每天要发 ${total} 次，超出的会失败；请到设置里改成 ${total} 以上（0 表示不限）。`,
-    guard.maxPerHour > 0 && guard.maxPerHour < perSlot && `“每小时最多”是 ${guard.maxPerHour} 次，少于每个时刻的 ${perSlot} 条。`,
-    guard.maxPerDay > 0 && guard.maxPerDay < total && `“每天最多”是 ${guard.maxPerDay} 次，少于每天的 ${total} 次。`,
+    selectedName !== SELF_CHAT_NAME && guard.maxPerGroupPerDay < total && `同一个群每天最多发 ${guard.maxPerGroupPerDay} 次（内置防封规则），这个群每天要发 ${total} 次，超出的会失败。只有“${SELF_CHAT_NAME}”不受这条限制。`,
+    guard.maxPerHour < perSlot && `每小时最多发 ${guard.maxPerHour} 次（内置防封规则），少于每个时刻的 ${perSlot} 条，多出的会顺延失败。`,
+    guard.maxPerDay < total && `每天最多发 ${guard.maxPerDay} 次（内置防封规则），少于每天的 ${total} 次。`,
   ].filter(Boolean) as string[] : [];
 
   return <Modal title="单群定时测试（云南示例数据）" onClose={onClose}>

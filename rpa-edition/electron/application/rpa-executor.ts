@@ -1,4 +1,4 @@
-import { RPA_CLIENT_LABELS, type AccountStatus, type LogEntry, type RpaGuard, type RpaSettings } from '../../src/domain/ops';
+import { RPA_CLIENT_LABELS, SELF_CHAT_NAME, type AccountStatus, type LogEntry, type RpaGuard, type RpaSettings } from '../../src/domain/ops';
 import type { DesktopRpaGateway } from './ports';
 
 // RPA 执行器：一个账号（一台电脑上登录的企业微信 / 微信）一个执行器。
@@ -72,7 +72,7 @@ export class RpaExecutor {
     if (guard.maxPerHour > 0 && this.logs.rpaSentSince(this.accountId, new Date(now.getTime() - 3600 * 1000)) >= guard.maxPerHour) return `最近一小时已发 ${guard.maxPerHour} 次，达到上限`;
     const today = startOfLocalDay(now);
     if (guard.maxPerDay > 0 && this.logs.rpaSentSince(this.accountId, today) >= guard.maxPerDay) return `今天已发 ${guard.maxPerDay} 次，达到每日上限`;
-    if (groupName && guard.maxPerGroupPerDay > 0 && this.logs.rpaSentSince(this.accountId, today, groupName) >= guard.maxPerGroupPerDay) return `这个群今天已发 ${guard.maxPerGroupPerDay} 次，达到单群上限`;
+    if (groupName && groupName !== SELF_CHAT_NAME && guard.maxPerGroupPerDay > 0 && this.logs.rpaSentSince(this.accountId, today, groupName) >= guard.maxPerGroupPerDay) return `这个群今天已发 ${guard.maxPerGroupPerDay} 次，达到单群上限`;
     return null;
   }
 

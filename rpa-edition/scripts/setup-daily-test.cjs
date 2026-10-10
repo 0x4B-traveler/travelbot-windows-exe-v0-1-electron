@@ -42,11 +42,11 @@ const GAP_MINUTES = 3;
   const tasks = new svc.TaskService(taskRepo, contents, groups, null, { forecastLine: async () => '' }, logs);
   const samples = new SampleDataService(join(root, 'sample-data'), materialRepo, files, routes, contents, logs, tasks, groups);
 
-  // 1. 防封设置：发送时段从 05:50 开始，单群每天 30 次，每天 40 次，每小时 12 次。
+  // 1. 发送时段从 05:50 开始，06:00 的任务才能准点发（其余防封规则内置不可改；文件传输助手不受单群每天次数限制）。
   const settings = sendStore.get();
-  settings.rpa.guard = { ...settings.rpa.guard, activeStart: '05:50', maxPerGroupPerDay: 30, maxPerDay: Math.max(40, settings.rpa.guard.maxPerDay), maxPerHour: Math.max(12, settings.rpa.guard.maxPerHour) };
+  settings.rpa.guard = { ...settings.rpa.guard, activeStart: '05:50' };
   sendStore.save(settings);
-  console.log('防封设置：', JSON.stringify(settings.rpa.guard));
+  console.log('发送时段：', `${settings.rpa.guard.activeStart}–${settings.rpa.guard.activeEnd}`);
 
   // 2. 云南示例数据（已导入的跳过）。
   const loaded = await samples.load('yunnan');

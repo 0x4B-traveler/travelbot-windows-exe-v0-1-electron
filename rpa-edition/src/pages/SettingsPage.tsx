@@ -3,7 +3,7 @@ import { call } from '../api';
 import { DEFAULT_AGENT_PORT, DEFAULT_RPA_GUARD, POOL_ROLE_LABELS, RPA_CLIENT_LABELS, type AccountStatus, type MailSettingsView, type PoolRole, type PoolSettings, type RpaAccount, type RpaClient, type RpaGuard, type RpaSettings, type SendSettings } from '../domain/ops';
 import { Card, Field, Notice, useAction } from '../ui';
 
-/** 设置：RPA 发送（桌面客户端、防封规则、账号池），保存后立即生效。不属于核心业务模块。 */
+/** 设置：RPA 发送（桌面客户端、发送时段、账号池），保存后立即生效；防封规则内置，只展示不可改。不属于核心业务模块。 */
 export function SettingsPage() {
   const [saved, setSaved] = useState<SendSettings | null>(null);
   const [rpa, setRpa] = useState<RpaSettings | null>(null);
@@ -50,28 +50,25 @@ export function SettingsPage() {
             <Field label="搜索快捷键" hint="^ 表示 Ctrl，% 表示 Alt，默认 ^f（Ctrl+F）"><input value={rpa.searchHotkey} onChange={event => patch({ searchHotkey: event.target.value })} /></Field>
             <Field label="每步等待（毫秒）" hint="电脑或网络较慢、搜索结果出来得慢时调大"><input type="number" min={200} max={5000} step={100} value={rpa.stepDelayMs} onChange={event => patch({ stepDelayMs: Number(event.target.value) })} /></Field>
             <Field label="客户端路径（可选）" hint={`${label}没打开时自动启动，例如 C:\\Program Files\\…\\${rpa.client === 'wecom' ? 'WXWork.exe' : 'Weixin.exe'}`}><input value={rpa.clientPath} onChange={event => patch({ clientPath: event.target.value })} placeholder="留空则需要手动打开客户端" /></Field>
-            <Field label="每次附带攻略图（张）" hint="取内容关联路线里素材的图片，0 表示只发文字"><input type="number" min={0} max={9} value={guard.maxImages} onChange={num('maxImages')} /></Field>
           </div>
           <label className="toggle-row"><input type="checkbox" checked={rpa.verifyChat} onChange={event => patch({ verifyChat: event.target.checked })} />发送前核对群名（用 Windows 自带 OCR 识别聊天标题，对不上就不发）</label>
           <label className="toggle-row"><input type="checkbox" checked={rpa.minimizeAfterSend} onChange={event => patch({ minimizeAfterSend: event.target.checked })} />发送成功后把{label}最小化，切回原来的窗口</label>
-          <h4 className="sub-title">防封设置</h4>
-          <p className="hint">按真人的节奏发：每一步操作都带随机停顿，群与群之间随机间隔；限制每小时、每天和单群的发送次数；只在白天时段发，时段外到点的任务自动顺延；连续失败会自动暂停。发送前后会检查{label}有没有弹出“安全验证 / 设备环境异常”，一旦弹出就暂停全部发送并弹通知，扫码验证后点“检测本机客户端”恢复。</p>
-          <p className="hint">降低风控的做法：用一台专用的实体电脑长期登录，不开远程控制、录屏和抓包工具；发送时不要有人操作这台电脑；新账号前一两周少发，可以先用“只粘贴，人工按发送”。<button className="link" onClick={() => patchGuard({ groupGapMinSec: DEFAULT_RPA_GUARD.groupGapMinSec, groupGapMaxSec: DEFAULT_RPA_GUARD.groupGapMaxSec, maxPerHour: DEFAULT_RPA_GUARD.maxPerHour, maxPerDay: DEFAULT_RPA_GUARD.maxPerDay, maxPerGroupPerDay: DEFAULT_RPA_GUARD.maxPerGroupPerDay, varyOpening: true })}>使用推荐的保守设置</button>（改完点“保存”）</p>
+          <h4 className="sub-title">防封保护（内置，不可关闭）</h4>
+          <p className="hint">按真人的节奏发，下面的规则一直生效，不能调高：</p>
+          <ul className="guard-list">
+            <li>每一步操作随机停顿，群与群之间随机间隔 {DEFAULT_RPA_GUARD.groupGapMinSec}–{DEFAULT_RPA_GUARD.groupGapMaxSec} 秒</li>
+            <li>每小时最多 {DEFAULT_RPA_GUARD.maxPerHour} 次，每天最多 {DEFAULT_RPA_GUARD.maxPerDay} 次，同一个群每天最多 {DEFAULT_RPA_GUARD.maxPerGroupPerDay} 次（发到一个群算一次）</li>
+            <li>开头随机加一句问候，让多个群收到的文字不完全一样；每次最多附 {DEFAULT_RPA_GUARD.maxImages} 张图</li>
+            <li>连续失败 {DEFAULT_RPA_GUARD.pauseAfterFailures} 次自动暂停 {DEFAULT_RPA_GUARD.pauseMinutes} 分钟</li>
+            <li>发送前后检查{label}有没有弹出“安全验证 / 设备环境异常”，一旦弹出就暂停全部发送并通知，扫码验证后点“检测本机客户端”恢复</li>
+          </ul>
           <div className="form-grid">
-            <Field label="群与群间隔（秒）" hint="每发完一个群随机等待这么久再发下一个">
-              <div className="inline-actions"><input type="number" min={0} max={600} value={guard.groupGapMinSec} onChange={num('groupGapMinSec')} /><span>到</span><input type="number" min={0} max={1800} value={guard.groupGapMaxSec} onChange={num('groupGapMaxSec')} /></div>
-            </Field>
             <Field label="发送时段" hint="时段外到点的任务顺延到下一个时段开始">
               <div className="inline-actions"><input type="time" value={guard.activeStart} onChange={event => patchGuard({ activeStart: event.target.value })} /><span>到</span><input type="time" value={guard.activeEnd} onChange={event => patchGuard({ activeEnd: event.target.value })} /></div>
             </Field>
-            <Field label="每小时最多（次）" hint="发到一个群算一次，0 表示不限"><input type="number" min={0} value={guard.maxPerHour} onChange={num('maxPerHour')} /></Field>
-            <Field label="每天最多（次）" hint="0 表示不限"><input type="number" min={0} value={guard.maxPerDay} onChange={num('maxPerDay')} /></Field>
-            <Field label="单群每天最多（次）" hint="防止重复任务把同一个群刷屏"><input type="number" min={0} value={guard.maxPerGroupPerDay} onChange={num('maxPerGroupPerDay')} /></Field>
-            <Field label="连续失败暂停" hint="连续失败几次后暂停多少分钟，0 次表示不暂停">
-              <div className="inline-actions"><input type="number" min={0} max={20} value={guard.pauseAfterFailures} onChange={num('pauseAfterFailures')} /><span>次 → 暂停</span><input type="number" min={1} value={guard.pauseMinutes} onChange={num('pauseMinutes')} /><span>分钟</span></div>
-            </Field>
+            <Field label="每次附带攻略图（张）" hint={`取内容关联路线里素材的图片，0 表示只发文字，最多 ${DEFAULT_RPA_GUARD.maxImages} 张`}><input type="number" min={0} max={DEFAULT_RPA_GUARD.maxImages} value={guard.maxImages} onChange={num('maxImages')} /></Field>
           </div>
-          <label className="toggle-row"><input type="checkbox" checked={guard.varyOpening} onChange={event => patchGuard({ varyOpening: event.target.checked })} />开头随机加一句问候（如“大家早上好！”），让多个群收到的文字不完全一样</label>
+          <p className="hint">另外请做到：用一台专用的实体电脑长期登录，不开远程控制、录屏和抓包工具；发送时不要有人操作这台电脑；新账号前一两周少发，可以先用“只粘贴，人工按发送”。</p>
           {!isAgent && <AccountPool pool={pool} onChange={setPool} />}
 
       <Notice notice={notice} />

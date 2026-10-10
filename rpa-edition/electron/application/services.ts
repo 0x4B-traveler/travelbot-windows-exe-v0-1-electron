@@ -6,7 +6,7 @@ import {
   type GenerateInput, type GroupMatchMode, type ImportResult, type LogEntry, type LogQuery, type Material, type MaterialFacets,
   type MaterialInput, type MaterialKind, type MaterialQuery, type OpsGroup, type OpsTask, type Route, type RouteInput,
   type RouteQuery, type TaskInput, type TaskRepeat, type TaskRun, type TaskStatus,
-  DEFAULT_AGENT_PORT, DEFAULT_SEND_SETTINGS, LOCAL_ACCOUNT_ID, MANUAL_CHAT_PREFIX, RPA_CLIENT_LABELS, resolveAccount,
+  builtInGuard, DEFAULT_AGENT_PORT, DEFAULT_SEND_SETTINGS, LOCAL_ACCOUNT_ID, MANUAL_CHAT_PREFIX, RPA_CLIENT_LABELS, resolveAccount,
   type AccountStatus, type MailSettings, type MailSettingsInput, type MailSettingsView, type PoolSettings, type RpaAccount, type RpaGuard, type RpaSettings, type SendSettings,
 } from '../../src/domain/ops';
 import { ContentRepository, GroupRepository, LogRepository, MaterialRepository, RouteRepository, TaskRepository, type StoredTask } from '../infrastructure/repositories';
@@ -382,23 +382,7 @@ function normalizeRpa(input?: Partial<RpaSettings>): RpaSettings {
 }
 
 function normalizeGuard(input?: Partial<RpaGuard>): RpaGuard {
-  const base = DEFAULT_SEND_SETTINGS.rpa.guard;
-  const int = (value: unknown, fallback: number, min: number, max: number) => { const n = Number(value); return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback; };
-  const time = (value: unknown, fallback: string) => { const text = String(value ?? '').trim(); return /^([01]?\d|2[0-3]):[0-5]\d$/.test(text) ? text : fallback; };
-  const gapMin = int(input?.groupGapMinSec, base.groupGapMinSec, 0, 600);
-  return {
-    groupGapMinSec: gapMin,
-    groupGapMaxSec: Math.max(gapMin, int(input?.groupGapMaxSec, base.groupGapMaxSec, 0, 1800)),
-    activeStart: time(input?.activeStart, base.activeStart),
-    activeEnd: time(input?.activeEnd, base.activeEnd),
-    maxPerHour: int(input?.maxPerHour, base.maxPerHour, 0, 1000),
-    maxPerDay: int(input?.maxPerDay, base.maxPerDay, 0, 10000),
-    maxPerGroupPerDay: int(input?.maxPerGroupPerDay, base.maxPerGroupPerDay, 0, 100),
-    pauseAfterFailures: int(input?.pauseAfterFailures, base.pauseAfterFailures, 0, 20),
-    pauseMinutes: int(input?.pauseMinutes, base.pauseMinutes, 1, 24 * 60),
-    varyOpening: input?.varyOpening ?? base.varyOpening,
-    maxImages: int(input?.maxImages, base.maxImages, 0, 9),
-  };
+  return builtInGuard(input);
 }
 
 // ───────── 群管理 ─────────
