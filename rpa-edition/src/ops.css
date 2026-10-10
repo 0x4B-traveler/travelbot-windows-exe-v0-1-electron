@@ -1,6 +1,6 @@
 /* 旅游运营助手：7 个模块共用的版式 */
 body{min-width:1080px}
-.content{max-width:1180px;padding:26px 36px 40px}
+.content{max-width:none;padding:26px 36px 40px}
 .brand .eyebrow{display:block;font-size:9px}
 .sidebar nav{gap:4px}
 .sidebar-status{width:100%;text-align:left}
@@ -109,7 +109,10 @@ textarea.editor-body{min-height:240px}
 /* 素材 */
 .image-row{display:flex;flex-wrap:wrap;gap:10px}
 .thumb{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:120px;min-height:110px;padding:8px;background:#ffffff;border:1px solid #e6d3c0;border-radius:10px;color:#7a6858;font-size:11px;overflow:hidden}
-.thumb img{width:100%;height:76px;object-fit:cover;border-radius:6px}
+.thumb img{width:100%;height:76px;object-fit:cover;border-radius:6px;cursor:zoom-in}
+.image-viewer{position:fixed;inset:0;z-index:80;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:30px;background:rgba(20,12,6,.82);cursor:zoom-out}
+.image-viewer img{max-width:100%;max-height:calc(100vh - 90px);object-fit:contain;border-radius:8px;box-shadow:0 20px 60px #0008;background:#fff}
+.image-viewer small{color:#f5ebe1;font-size:12px}
 .thumb.add{cursor:pointer;border-style:dashed;font:600 12px Manrope}
 .thumb.add:hover{border-color:#ff7a1a;color:#ee6a0c}
 

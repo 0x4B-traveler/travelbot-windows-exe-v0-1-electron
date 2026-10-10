@@ -53,7 +53,19 @@ export function MaterialsPage() {
 
 function MaterialDetail({ material, onClose, onEdit, onChanged }: { material: Material; onClose: () => void; onEdit: () => void; onChanged: (next: Material | null) => Promise<void> }) {
   const [images, setImages] = useState<Record<string, string | null>>({});
+  const [viewing, setViewing] = useState<number | null>(null);
   const { busy, notice, run } = useAction();
+  const shown = material.images.filter(image => images[image.id]);
+  useEffect(() => {
+    if (viewing === null) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.stopPropagation(); setViewing(null); }
+      if (event.key === 'ArrowRight') setViewing(index => index === null ? null : (index + 1) % shown.length);
+      if (event.key === 'ArrowLeft') setViewing(index => index === null ? null : (index - 1 + shown.length) % shown.length);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [viewing, shown.length]);
   useEffect(() => {
     let alive = true;
     void Promise.all(material.images.map(async image => [image.id, await call('material.imageData', { imageId: image.id }).catch(() => null)] as const))
@@ -71,7 +83,7 @@ function MaterialDetail({ material, onClose, onEdit, onChanged }: { material: Ma
       <dt>关联图片</dt><dd>
         <div className="image-row">
           {material.images.map(image => <div className="thumb" key={image.id}>
-            {images[image.id] ? <img src={images[image.id]!} alt={image.fileName} /> : <span>{image.fileName}</span>}
+            {images[image.id] ? <img src={images[image.id]!} alt={image.fileName} title="点击查看大图" onClick={() => setViewing(shown.indexOf(image))} /> : <span>{image.fileName}</span>}
             <button className="link danger-text" disabled={busy} onClick={() => void run(async () => { await onChanged(await call('material.removeImage', { id: material.id, imageId: image.id })); })}>移除</button>
           </div>)}
           <button className="thumb add" disabled={busy} onClick={() => void run(async () => { await onChanged(await call('material.addImages', { id: material.id })); })}>＋ 添加图片</button>
@@ -83,6 +95,10 @@ function MaterialDetail({ material, onClose, onEdit, onChanged }: { material: Ma
       <button className="secondary danger" disabled={busy} onClick={() => { if (window.confirm(`确定删除素材“${material.title}”吗？关联的路线节点会保留文字。`)) void run(async () => { await call('material.delete', { id: material.id }); await onChanged(null); }); }}>删除</button>
       <button className="primary" onClick={onEdit}>编辑</button>
     </div>
+    {viewing !== null && shown[viewing] && <div className="image-viewer" onClick={() => setViewing(null)}>
+      <img src={images[shown[viewing].id]!} alt={shown[viewing].fileName} />
+      <small>{shown.length > 1 ? `${viewing + 1} / ${shown.length} · ← → 切换 · ` : ''}点击任意处或按 Esc 关闭</small>
+    </div>}
   </Modal>;
 }
 

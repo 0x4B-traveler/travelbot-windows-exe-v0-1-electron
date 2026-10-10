@@ -45,7 +45,7 @@
 .sidebar-status i{width:8px;height:8px;border-radius:99px;background:#9a8572}
 .sidebar-status.authorized i{background:#34b360;box-shadow:0 0 10px #34b360}
 .sidebar-status.error i{background:#e07a3a}
-.content{flex:1;min-width:0;padding:30px 36px 10px;max-width:1060px}
+.content{flex:1;min-width:0;padding:30px 36px 10px}
 .page-head{display:flex;align-items:end;justify-content:space-between;padding-bottom:22px;margin-bottom:22px;border-bottom:1px solid #f0e2d4}
 .page-head h1{font-size:26px;letter-spacing:-1px;margin:8px 0 6px}
 .content .steps{padding:0 0 20px}
