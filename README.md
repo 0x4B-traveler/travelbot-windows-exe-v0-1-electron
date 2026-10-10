@@ -25,6 +25,8 @@ The test message is sent to the identity returned by the official CLI. This resp
 
 TravelBot Windows 是一个基于 Electron、React 和 TypeScript 的企业微信桌面工具。
 
+> 不调用企业微信接口、直接操作桌面企业微信 / 微信发群消息的 **RPA 版** 是一个独立程序，在 [`rpa-edition/`](rpa-edition/README.md) 目录，单独安装和打包。本目录是接口版。
+
 ## 当前业务层
 
 业务逻辑与通用 UI 分离，核心服务位于 `electron/services`，共享类型位于 `src/domain`：

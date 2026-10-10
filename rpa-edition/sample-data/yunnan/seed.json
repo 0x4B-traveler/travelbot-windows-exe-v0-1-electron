@@ -1,0 +1,1039 @@
+{
+  "name": "云南示例数据",
+  "tag": "示例数据",
+  "materials": [
+    {
+      "key": "guide-昆明",
+      "kind": "guide",
+      "title": "昆明旅行攻略",
+      "city": "昆明",
+      "tags": [
+        "攻略",
+        "示例数据"
+      ],
+      "body": "四季如春，全年适合出行；冬季早晚温差大，带件外套。长水机场到市区约 40 分钟，地铁 6 号线直达；去石林可坐高铁到石林西站。必吃：过桥米线、汽锅鸡、鲜花饼、野生菌火锅（菌子一定要煮熟）。",
+      "images": [
+        "images/guide-kunming.jpg"
+      ]
+    },
+    {
+      "key": "guide-大理",
+      "kind": "guide",
+      "title": "大理旅行攻略",
+      "city": "大理",
+      "tags": [
+        "攻略",
+        "示例数据"
+      ],
+      "body": "3—5 月和 9—11 月最舒服；紫外线强，注意防晒。昆明到大理动车约 2 小时；环洱海建议包车或租电动车。必吃：酸辣鱼、乳扇、饵块、喜洲粑粑、雕梅。",
+      "images": [
+        "images/guide-dali.jpg"
+      ]
+    },
+    {
+      "key": "guide-丽江",
+      "kind": "guide",
+      "title": "丽江旅行攻略",
+      "city": "丽江",
+      "tags": [
+        "攻略",
+        "示例数据"
+      ],
+      "body": "玉龙雪山常年低温，上山带羽绒服；高原反应注意别剧烈运动。大理到丽江动车约 1.5 小时；玉龙雪山需提前在官方渠道预约索道。必吃：腊排骨火锅、鸡豆凉粉、丽江粑粑、纳西烤鱼。",
+      "images": [
+        "images/guide-lijiang.jpg"
+      ]
+    },
+    {
+      "key": "guide-香格里拉",
+      "kind": "guide",
+      "title": "香格里拉旅行攻略",
+      "city": "香格里拉",
+      "tags": [
+        "攻略",
+        "示例数据"
+      ],
+      "body": "海拔约 3300 米，早晚冷；6—9 月花海最好看，冬季可看雪景。丽江到香格里拉自驾或大巴约 3.5 小时；景点之间建议包车。必吃：牦牛火锅、酥油茶、青稞饼、藏式烤肉。",
+      "images": [
+        "images/guide-shangrila.jpg"
+      ]
+    },
+    {
+      "key": "guide-西双版纳",
+      "kind": "guide",
+      "title": "西双版纳旅行攻略",
+      "city": "西双版纳",
+      "tags": [
+        "攻略",
+        "示例数据"
+      ],
+      "body": "11 月—次年 4 月干季最适合；夏季多雨闷热，备好驱蚊。嘎洒机场离告庄约 15 分钟；野象谷和植物园可坐动车或包车。必吃：傣味烧烤、菠萝饭、柠檬撒撇、手抓饭。",
+      "images": [
+        "images/guide-banna.jpg"
+      ]
+    },
+    {
+      "key": "guide-腾冲",
+      "kind": "guide",
+      "title": "腾冲旅行攻略",
+      "city": "腾冲",
+      "tags": [
+        "攻略",
+        "示例数据"
+      ],
+      "body": "秋冬银杏季（11 月中下旬）最热门；全年都适合泡温泉。驼峰机场离市区约 20 分钟；和顺古镇和热海之间打车约 30 分钟。必吃：大救驾（炒饵块）、稀豆粉、土锅子、松花糕。",
+      "images": [
+        "images/guide-tengchong.jpg"
+      ]
+    },
+    {
+      "key": "km-dianchi",
+      "kind": "spot",
+      "title": "滇池海埂大坝",
+      "city": "昆明",
+      "tags": [
+        "湖景",
+        "观鸟",
+        "示例数据"
+      ],
+      "body": "冬季可以近距离看红嘴鸥，傍晚看滇池日落。建议游玩 2 小时。",
+      "images": [
+        "images/km-dianchi.jpg"
+      ]
+    },
+    {
+      "key": "km-shilin",
+      "kind": "spot",
+      "title": "石林风景区",
+      "city": "昆明",
+      "tags": [
+        "5A",
+        "世界遗产",
+        "示例数据"
+      ],
+      "body": "喀斯特地貌奇观，大小石林步行约 3 小时，记得穿舒适的鞋。",
+      "images": [
+        "images/km-shilin.jpg"
+      ]
+    },
+    {
+      "key": "km-cuihu",
+      "kind": "spot",
+      "title": "翠湖公园",
+      "city": "昆明",
+      "tags": [
+        "城市漫步",
+        "示例数据"
+      ],
+      "body": "市中心的湖景公园，周边有云南大学和陆军讲武堂，适合半天慢逛。",
+      "images": [
+        "images/km-cuihu.jpg"
+      ]
+    },
+    {
+      "key": "km-mixian",
+      "kind": "restaurant",
+      "title": "建新园过桥米线",
+      "city": "昆明",
+      "tags": [
+        "老字号",
+        "美食",
+        "示例数据"
+      ],
+      "body": "昆明老字号米线店，人均 30 元左右，早餐时段人多。",
+      "images": [
+        "images/km-mixian.jpg"
+      ]
+    },
+    {
+      "key": "dl-gucheng",
+      "kind": "spot",
+      "title": "大理古城",
+      "city": "大理",
+      "tags": [
+        "古城",
+        "夜景",
+        "示例数据"
+      ],
+      "body": "人民路和洋人街最热闹，晚上逛更有氛围，适合拍照和买手作。",
+      "images": [
+        "images/dl-gucheng.jpg"
+      ]
+    },
+    {
+      "key": "dl-erhai",
+      "kind": "spot",
+      "title": "洱海生态廊道",
+      "city": "大理",
+      "tags": [
+        "湖景",
+        "骑行",
+        "示例数据"
+      ],
+      "body": "沿洱海西岸骑行或步行，海舌公园、龙龛码头适合看日出。",
+      "images": [
+        "images/dl-erhai.jpg"
+      ]
+    },
+    {
+      "key": "dl-xizhou",
+      "kind": "spot",
+      "title": "喜洲古镇",
+      "city": "大理",
+      "tags": [
+        "古镇",
+        "稻田",
+        "示例数据"
+      ],
+      "body": "白族民居和稻田，夏季稻田最出片，必吃喜洲粑粑。",
+      "images": [
+        "images/dl-xizhou.jpg"
+      ]
+    },
+    {
+      "key": "dl-santa",
+      "kind": "spot",
+      "title": "崇圣寺三塔",
+      "city": "大理",
+      "tags": [
+        "5A",
+        "人文",
+        "示例数据"
+      ],
+      "body": "大理地标，建议上午去，顺光拍三塔倒影。",
+      "images": [
+        "images/dl-santa.jpg"
+      ]
+    },
+    {
+      "key": "dl-fish",
+      "kind": "restaurant",
+      "title": "洱海酸辣鱼",
+      "city": "大理",
+      "tags": [
+        "美食",
+        "示例数据"
+      ],
+      "body": "白族特色酸辣鱼，人均 70 元左右，古城和双廊都有。",
+      "images": [
+        "images/dl-fish.jpg"
+      ]
+    },
+    {
+      "key": "dl-hotel",
+      "kind": "hotel",
+      "title": "双廊海景民宿",
+      "city": "大理",
+      "tags": [
+        "海景",
+        "民宿",
+        "示例数据"
+      ],
+      "body": "推开窗就是洱海，旺季提前一周预订，参考价 400—800 元/晚。",
+      "images": [
+        "images/dl-hotel.jpg"
+      ]
+    },
+    {
+      "key": "lj-gucheng",
+      "kind": "spot",
+      "title": "丽江古城",
+      "city": "丽江",
+      "tags": [
+        "古城",
+        "世界遗产",
+        "示例数据"
+      ],
+      "body": "四方街、木府、大水车，清晨人少适合拍照，晚上看古城夜景。",
+      "images": [
+        "images/lj-gucheng.jpg"
+      ]
+    },
+    {
+      "key": "lj-yulong",
+      "kind": "spot",
+      "title": "玉龙雪山",
+      "city": "丽江",
+      "tags": [
+        "5A",
+        "雪山",
+        "示例数据"
+      ],
+      "body": "冰川公园大索道需提前预约，山顶海拔 4680 米，带上氧气瓶和羽绒服。",
+      "images": [
+        "images/lj-yulong.jpg"
+      ]
+    },
+    {
+      "key": "lj-lanyue",
+      "kind": "spot",
+      "title": "蓝月谷",
+      "city": "丽江",
+      "tags": [
+        "湖景",
+        "示例数据"
+      ],
+      "body": "雪山脚下的蓝色湖泊，晴天颜色最好看，和玉龙雪山同一天游览。",
+      "images": [
+        "images/lj-lanyue.jpg"
+      ]
+    },
+    {
+      "key": "lj-shuhe",
+      "kind": "spot",
+      "title": "束河古镇",
+      "city": "丽江",
+      "tags": [
+        "古镇",
+        "示例数据"
+      ],
+      "body": "比大研古城安静，适合慢慢逛和喝咖啡。",
+      "images": [
+        "images/lj-shuhe.jpg"
+      ]
+    },
+    {
+      "key": "lj-hotpot",
+      "kind": "restaurant",
+      "title": "纳西腊排骨火锅",
+      "city": "丽江",
+      "tags": [
+        "美食",
+        "示例数据"
+      ],
+      "body": "丽江招牌美食，人均 60 元左右，可以加一份鸡豆凉粉。",
+      "images": [
+        "images/lj-hotpot.jpg"
+      ]
+    },
+    {
+      "key": "xgll-pudacuo",
+      "kind": "spot",
+      "title": "普达措国家公园",
+      "city": "香格里拉",
+      "tags": [
+        "5A",
+        "高原湖泊",
+        "示例数据"
+      ],
+      "body": "属都湖和碧塔海，栈道徒步约 3 小时，注意保暖、慢走防高反。",
+      "images": [
+        "images/xgll-pudacuo.jpg"
+      ]
+    },
+    {
+      "key": "xgll-songzanlin",
+      "kind": "spot",
+      "title": "松赞林寺",
+      "city": "香格里拉",
+      "tags": [
+        "人文",
+        "藏传佛教",
+        "示例数据"
+      ],
+      "body": "被称为“小布达拉宫”，参观时顺时针绕行，尊重寺院礼仪。",
+      "images": [
+        "images/xgll-songzanlin.jpg"
+      ]
+    },
+    {
+      "key": "xgll-dukezong",
+      "kind": "spot",
+      "title": "独克宗古城",
+      "city": "香格里拉",
+      "tags": [
+        "古城",
+        "示例数据"
+      ],
+      "body": "世界最大转经筒所在地，晚上广场有锅庄舞可以一起跳。",
+      "images": [
+        "images/xgll-dukezong.jpg"
+      ]
+    },
+    {
+      "key": "bn-gaozhuang",
+      "kind": "spot",
+      "title": "告庄西双景",
+      "city": "西双版纳",
+      "tags": [
+        "夜市",
+        "夜景",
+        "示例数据"
+      ],
+      "body": "星光夜市和大金塔，晚上 7 点后最热闹，可以换傣装拍照。",
+      "images": [
+        "images/bn-gaozhuang.jpg"
+      ]
+    },
+    {
+      "key": "bn-yexianggu",
+      "kind": "spot",
+      "title": "野象谷",
+      "city": "西双版纳",
+      "tags": [
+        "雨林",
+        "亲子",
+        "示例数据"
+      ],
+      "body": "有机会看到野生亚洲象，高空栈道走一圈约 2 小时。",
+      "images": [
+        "images/bn-yexianggu.jpg"
+      ]
+    },
+    {
+      "key": "bn-zhiwuyuan",
+      "kind": "spot",
+      "title": "中科院西双版纳热带植物园",
+      "city": "西双版纳",
+      "tags": [
+        "雨林",
+        "科普",
+        "示例数据"
+      ],
+      "body": "国内最大的热带植物园之一，园区大，建议坐电瓶车。",
+      "images": [
+        "images/bn-zhiwuyuan.jpg"
+      ]
+    },
+    {
+      "key": "bn-food",
+      "kind": "restaurant",
+      "title": "傣味烧烤",
+      "city": "西双版纳",
+      "tags": [
+        "美食",
+        "示例数据"
+      ],
+      "body": "香茅草烤鱼、包烧、菠萝饭，人均 60 元左右。",
+      "images": [
+        "images/bn-food.jpg"
+      ]
+    },
+    {
+      "key": "tc-heshun",
+      "kind": "spot",
+      "title": "和顺古镇",
+      "city": "腾冲",
+      "tags": [
+        "古镇",
+        "人文",
+        "示例数据"
+      ],
+      "body": "保存完好的侨乡古镇，和顺图书馆和洗衣亭值得一看。",
+      "images": [
+        "images/tc-heshun.jpg"
+      ]
+    },
+    {
+      "key": "tc-rehai",
+      "kind": "spot",
+      "title": "热海景区",
+      "city": "腾冲",
+      "tags": [
+        "温泉",
+        "地热",
+        "示例数据"
+      ],
+      "body": "大滚锅和地热奇观，景区里可以泡温泉、吃温泉煮鸡蛋。",
+      "images": [
+        "images/tc-rehai.jpg"
+      ]
+    },
+    {
+      "key": "tc-yinxing",
+      "kind": "spot",
+      "title": "银杏村",
+      "city": "腾冲",
+      "tags": [
+        "银杏",
+        "秋季限定",
+        "示例数据"
+      ],
+      "body": "11 月中下旬满村金黄，其余季节是安静的田园村落。",
+      "images": [
+        "images/tc-yinxing.jpg"
+      ]
+    },
+    {
+      "key": "r-kunming-map",
+      "kind": "route",
+      "title": "昆明石林2日游路线图",
+      "city": "昆明",
+      "tags": [
+        "路线图",
+        "示例数据"
+      ],
+      "body": "春城慢游加世界遗产石林，适合周末短途。",
+      "images": [
+        "images/r-kunming-map.jpg",
+        "images/guide-kunming.jpg"
+      ]
+    },
+    {
+      "key": "r-dali-map",
+      "kind": "route",
+      "title": "大理洱海3日休闲游路线图",
+      "city": "大理",
+      "tags": [
+        "路线图",
+        "示例数据"
+      ],
+      "body": "环洱海骑行、古城夜游、喜洲稻田，一次玩遍大理精华。",
+      "images": [
+        "images/r-dali-map.jpg",
+        "images/guide-dali.jpg"
+      ]
+    },
+    {
+      "key": "r-dali-lijiang-map",
+      "kind": "route",
+      "title": "大理丽江4日经典游路线图",
+      "city": "大理",
+      "tags": [
+        "路线图",
+        "示例数据"
+      ],
+      "body": "洱海 + 玉龙雪山 + 两座古城，第一次来云南的首选。",
+      "images": [
+        "images/r-dali-lijiang-map.jpg",
+        "images/guide-dali.jpg"
+      ]
+    },
+    {
+      "key": "r-shangrila-map",
+      "kind": "route",
+      "title": "丽江香格里拉5日深度游路线图",
+      "city": "香格里拉",
+      "tags": [
+        "路线图",
+        "示例数据"
+      ],
+      "body": "从纳西古城到藏地秘境，慢节奏适应海拔。",
+      "images": [
+        "images/r-shangrila-map.jpg",
+        "images/guide-shangrila.jpg"
+      ]
+    },
+    {
+      "key": "r-banna-map",
+      "kind": "route",
+      "title": "西双版纳3日热带雨林游路线图",
+      "city": "西双版纳",
+      "tags": [
+        "路线图",
+        "示例数据"
+      ],
+      "body": "看野象、逛植物园、夜游告庄，冬天也能穿短袖。",
+      "images": [
+        "images/r-banna-map.jpg",
+        "images/guide-banna.jpg"
+      ]
+    },
+    {
+      "key": "r-tengchong-map",
+      "kind": "route",
+      "title": "腾冲和顺温泉2日游路线图",
+      "city": "腾冲",
+      "tags": [
+        "路线图",
+        "示例数据"
+      ],
+      "body": "侨乡古镇 + 地热温泉，秋天还能看满村银杏。",
+      "images": [
+        "images/r-tengchong-map.jpg",
+        "images/guide-tengchong.jpg"
+      ]
+    },
+    {
+      "key": "h-kunming",
+      "kind": "hotel",
+      "title": "昆明翠湖片区酒店（示例）",
+      "city": "昆明",
+      "tags": [
+        "酒店",
+        "示例数据"
+      ],
+      "body": "酒店在翠湖边，步行 5 分钟到翠湖公园，楼下有过桥米线和鲜花饼店。早餐 7:00—10:00，次日 8:30 大堂集合。",
+      "images": []
+    },
+    {
+      "key": "h-dali",
+      "kind": "hotel",
+      "title": "大理古城客栈（示例）",
+      "city": "大理",
+      "tags": [
+        "酒店",
+        "示例数据"
+      ],
+      "body": "客栈在古城南门附近，晚上可以逛人民路和洋人街。古城石板路不平，夜里出门注意脚下，贵重物品随身带。",
+      "images": []
+    },
+    {
+      "key": "h-lijiang",
+      "kind": "hotel",
+      "title": "丽江古城客栈（示例）",
+      "city": "丽江",
+      "tags": [
+        "酒店",
+        "示例数据"
+      ],
+      "body": "客栈在古城北门，离大水车步行 10 分钟。丽江早晚温差大，明天上雪山请早点休息，备好厚外套。",
+      "images": []
+    }
+  ],
+  "routes": [
+    {
+      "key": "r-kunming",
+      "name": "昆明石林2日游",
+      "city": "昆明",
+      "days": 2,
+      "tags": [
+        "周末",
+        "轻松"
+      ],
+      "summary": "春城慢游加世界遗产石林，适合周末短途。",
+      "weatherCity": "昆明",
+      "items": [
+        {
+          "day": 1,
+          "time": "09:00",
+          "title": "集合出发",
+          "material": "r-kunming-map",
+          "note": "集合出发，导游讲解行程"
+        },
+        {
+          "day": 1,
+          "time": "09:30",
+          "title": "翠湖公园",
+          "material": "km-cuihu",
+          "note": ""
+        },
+        {
+          "day": 1,
+          "time": "12:00",
+          "title": "过桥米线午餐",
+          "material": "km-mixian",
+          "note": ""
+        },
+        {
+          "day": 1,
+          "time": "15:30",
+          "title": "滇池海埂大坝",
+          "material": "km-dianchi",
+          "note": "傍晚看日落"
+        },
+        {
+          "day": 2,
+          "time": "08:30",
+          "title": "石林风景区",
+          "material": "km-shilin",
+          "note": "全天游览，含电瓶车"
+        },
+        {
+          "day": 2,
+          "time": "17:00",
+          "title": "返回昆明市区",
+          "material": "",
+          "note": "散团"
+        }
+      ]
+    },
+    {
+      "key": "r-dali",
+      "name": "大理洱海3日休闲游",
+      "city": "大理",
+      "days": 3,
+      "tags": [
+        "休闲",
+        "拍照"
+      ],
+      "summary": "环洱海骑行、古城夜游、喜洲稻田，一次玩遍大理精华。",
+      "weatherCity": "大理",
+      "items": [
+        {
+          "day": 1,
+          "time": "10:00",
+          "title": "集合出发",
+          "material": "r-dali-map",
+          "note": "大理站接站，入住民宿"
+        },
+        {
+          "day": 1,
+          "time": "14:00",
+          "title": "崇圣寺三塔",
+          "material": "dl-santa",
+          "note": ""
+        },
+        {
+          "day": 1,
+          "time": "19:00",
+          "title": "大理古城夜游",
+          "material": "dl-gucheng",
+          "note": ""
+        },
+        {
+          "day": 2,
+          "time": "07:00",
+          "title": "洱海日出",
+          "material": "dl-erhai",
+          "note": "龙龛码头看日出"
+        },
+        {
+          "day": 2,
+          "time": "12:00",
+          "title": "酸辣鱼午餐",
+          "material": "dl-fish",
+          "note": ""
+        },
+        {
+          "day": 2,
+          "time": "15:00",
+          "title": "双廊海景民宿",
+          "material": "dl-hotel",
+          "note": "下午茶看洱海"
+        },
+        {
+          "day": 3,
+          "time": "09:00",
+          "title": "喜洲古镇",
+          "material": "dl-xizhou",
+          "note": "稻田骑行"
+        },
+        {
+          "day": 3,
+          "time": "15:00",
+          "title": "返程",
+          "material": "",
+          "note": "送站"
+        }
+      ]
+    },
+    {
+      "key": "r-dali-lijiang",
+      "name": "大理丽江4日经典游",
+      "city": "大理",
+      "days": 4,
+      "tags": [
+        "经典",
+        "雪山"
+      ],
+      "summary": "洱海 + 玉龙雪山 + 两座古城，第一次来云南的首选。",
+      "weatherCity": "丽江",
+      "items": [
+        {
+          "day": 1,
+          "time": "10:00",
+          "title": "集合出发",
+          "material": "r-dali-lijiang-map",
+          "note": "大理接站"
+        },
+        {
+          "day": 1,
+          "time": "14:00",
+          "title": "大理古城",
+          "material": "dl-gucheng",
+          "note": ""
+        },
+        {
+          "day": 2,
+          "time": "08:00",
+          "title": "洱海生态廊道",
+          "material": "dl-erhai",
+          "note": ""
+        },
+        {
+          "day": 2,
+          "time": "16:00",
+          "title": "动车前往丽江",
+          "material": "",
+          "note": "约 1.5 小时"
+        },
+        {
+          "day": 3,
+          "time": "07:30",
+          "title": "玉龙雪山",
+          "material": "lj-yulong",
+          "note": "大索道需提前预约"
+        },
+        {
+          "day": 3,
+          "time": "13:30",
+          "title": "蓝月谷",
+          "material": "lj-lanyue",
+          "note": ""
+        },
+        {
+          "day": 3,
+          "time": "18:30",
+          "title": "腊排骨火锅晚餐",
+          "material": "lj-hotpot",
+          "note": ""
+        },
+        {
+          "day": 4,
+          "time": "09:00",
+          "title": "丽江古城",
+          "material": "lj-gucheng",
+          "note": ""
+        },
+        {
+          "day": 4,
+          "time": "14:00",
+          "title": "束河古镇",
+          "material": "lj-shuhe",
+          "note": "自由活动后送机"
+        }
+      ]
+    },
+    {
+      "key": "r-shangrila",
+      "name": "丽江香格里拉5日深度游",
+      "city": "香格里拉",
+      "days": 5,
+      "tags": [
+        "高原",
+        "深度"
+      ],
+      "summary": "从纳西古城到藏地秘境，慢节奏适应海拔。",
+      "weatherCity": "香格里拉",
+      "items": [
+        {
+          "day": 1,
+          "time": "10:00",
+          "title": "集合出发",
+          "material": "r-shangrila-map",
+          "note": "丽江接机"
+        },
+        {
+          "day": 1,
+          "time": "15:00",
+          "title": "丽江古城",
+          "material": "lj-gucheng",
+          "note": ""
+        },
+        {
+          "day": 2,
+          "time": "07:30",
+          "title": "玉龙雪山",
+          "material": "lj-yulong",
+          "note": ""
+        },
+        {
+          "day": 2,
+          "time": "13:30",
+          "title": "蓝月谷",
+          "material": "lj-lanyue",
+          "note": ""
+        },
+        {
+          "day": 3,
+          "time": "08:00",
+          "title": "前往香格里拉",
+          "material": "",
+          "note": "车程约 3.5 小时，途经虎跳峡"
+        },
+        {
+          "day": 3,
+          "time": "19:00",
+          "title": "独克宗古城",
+          "material": "xgll-dukezong",
+          "note": "晚上跳锅庄"
+        },
+        {
+          "day": 4,
+          "time": "09:00",
+          "title": "普达措国家公园",
+          "material": "xgll-pudacuo",
+          "note": ""
+        },
+        {
+          "day": 5,
+          "time": "09:00",
+          "title": "松赞林寺",
+          "material": "xgll-songzanlin",
+          "note": ""
+        },
+        {
+          "day": 5,
+          "time": "14:00",
+          "title": "返程",
+          "material": "",
+          "note": "送机"
+        }
+      ]
+    },
+    {
+      "key": "r-banna",
+      "name": "西双版纳3日热带雨林游",
+      "city": "西双版纳",
+      "days": 3,
+      "tags": [
+        "亲子",
+        "雨林"
+      ],
+      "summary": "看野象、逛植物园、夜游告庄，冬天也能穿短袖。",
+      "weatherCity": "景洪",
+      "items": [
+        {
+          "day": 1,
+          "time": "11:00",
+          "title": "集合出发",
+          "material": "r-banna-map",
+          "note": "景洪接机"
+        },
+        {
+          "day": 1,
+          "time": "19:00",
+          "title": "告庄西双景夜市",
+          "material": "bn-gaozhuang",
+          "note": ""
+        },
+        {
+          "day": 2,
+          "time": "08:30",
+          "title": "野象谷",
+          "material": "bn-yexianggu",
+          "note": ""
+        },
+        {
+          "day": 2,
+          "time": "18:30",
+          "title": "傣味烧烤晚餐",
+          "material": "bn-food",
+          "note": ""
+        },
+        {
+          "day": 3,
+          "time": "09:00",
+          "title": "热带植物园",
+          "material": "bn-zhiwuyuan",
+          "note": ""
+        },
+        {
+          "day": 3,
+          "time": "16:00",
+          "title": "返程",
+          "material": "",
+          "note": "送机"
+        }
+      ]
+    },
+    {
+      "key": "r-tengchong",
+      "name": "腾冲和顺温泉2日游",
+      "city": "腾冲",
+      "days": 2,
+      "tags": [
+        "温泉",
+        "秋季"
+      ],
+      "summary": "侨乡古镇 + 地热温泉，秋天还能看满村银杏。",
+      "weatherCity": "腾冲",
+      "items": [
+        {
+          "day": 1,
+          "time": "10:00",
+          "title": "集合出发",
+          "material": "r-tengchong-map",
+          "note": "腾冲接机"
+        },
+        {
+          "day": 1,
+          "time": "14:00",
+          "title": "和顺古镇",
+          "material": "tc-heshun",
+          "note": ""
+        },
+        {
+          "day": 1,
+          "time": "19:00",
+          "title": "热海泡温泉",
+          "material": "tc-rehai",
+          "note": ""
+        },
+        {
+          "day": 2,
+          "time": "09:00",
+          "title": "银杏村",
+          "material": "tc-yinxing",
+          "note": ""
+        },
+        {
+          "day": 2,
+          "time": "15:00",
+          "title": "返程",
+          "material": "",
+          "note": "送机"
+        }
+      ]
+    }
+  ],
+  "tourRoutes": [
+    {
+      "key": "tour-yunnan6",
+      "name": "云南昆明大理丽江6日游",
+      "tags": [
+        "经典",
+        "示例数据"
+      ],
+      "summary": "昆明进、丽江出，石林、洱海、玉龙雪山一次走完。",
+      "days": [
+        {
+          "day": 1,
+          "city": "昆明",
+          "plan": "抵达昆明，下午翠湖公园自由活动",
+          "hotel": "h-kunming",
+          "spots": [
+            "km-cuihu"
+          ]
+        },
+        {
+          "day": 2,
+          "city": "昆明",
+          "plan": "石林风景区，傍晚动车前往大理",
+          "hotel": "h-dali",
+          "spots": [
+            "km-shilin"
+          ]
+        },
+        {
+          "day": 3,
+          "city": "大理",
+          "plan": "崇圣寺三塔、大理古城",
+          "hotel": "h-dali",
+          "spots": [
+            "dl-santa",
+            "dl-gucheng"
+          ]
+        },
+        {
+          "day": 4,
+          "city": "大理",
+          "plan": "洱海生态廊道骑行、喜洲古镇，入住双廊",
+          "hotel": "dl-hotel",
+          "spots": [
+            "dl-erhai"
+          ]
+        },
+        {
+          "day": 5,
+          "city": "丽江",
+          "plan": "玉龙雪山、蓝月谷",
+          "hotel": "h-lijiang",
+          "spots": [
+            "lj-yulong",
+            "lj-lanyue"
+          ]
+        },
+        {
+          "day": 6,
+          "city": "丽江",
+          "plan": "丽江古城、束河古镇，下午返程",
+          "spots": [
+            "lj-gucheng"
+          ]
+        }
+      ]
+    }
+  ]
+}
