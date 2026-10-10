@@ -258,16 +258,9 @@ export type MailSettings = { enabled: boolean; host: string; port: number; secur
 export type MailSettingsView = MailSettings & { hasPassword: boolean };
 export type MailSettingsInput = MailSettings & { /** 留空表示保留已保存的授权码 */ password?: string };
 export const DEFAULT_RPA_GUARD: RpaGuard = { groupGapMinSec: 60, groupGapMaxSec: 180, activeStart: '07:30', activeEnd: '21:30', maxPerHour: 10, maxPerDay: 40, maxPerGroupPerDay: 3, pauseAfterFailures: 3, pauseMinutes: 30, varyOpening: false, maxImages: 3 };
-/** 防封规则内置、不可调：只有发送时段和附图张数（最多 3 张）按设置来，其余一律用上面的保守值。 */
-export function builtInGuard(input?: Partial<RpaGuard>): RpaGuard {
-  const time = (value: unknown, fallback: string) => { const text = String(value ?? '').trim(); return /^([01]?\d|2[0-3]):[0-5]\d$/.test(text) ? text : fallback; };
-  const images = Number(input?.maxImages);
-  return {
-    ...DEFAULT_RPA_GUARD,
-    activeStart: time(input?.activeStart, DEFAULT_RPA_GUARD.activeStart),
-    activeEnd: time(input?.activeEnd, DEFAULT_RPA_GUARD.activeEnd),
-    maxImages: Number.isFinite(images) ? Math.min(DEFAULT_RPA_GUARD.maxImages, Math.max(0, Math.round(images))) : DEFAULT_RPA_GUARD.maxImages,
-  };
+/** 防封规则全部内置、界面上不显示也不能改（发送时段、附图张数也固定）；旧版本保存的自定义值一律不再生效。 */
+export function builtInGuard(_input?: Partial<RpaGuard>): RpaGuard {
+  return { ...DEFAULT_RPA_GUARD };
 }
 /** 自己的“文件传输助手”不是群，不受单群每天次数限制（只用来测试），但仍计入每小时、每天的总次数。 */
 export const SELF_CHAT_NAME = '文件传输助手';

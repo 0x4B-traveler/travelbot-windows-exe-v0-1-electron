@@ -141,7 +141,7 @@ function GroupDetail({ group, routes, send, onClose, onChanged, onDeleted }: { g
     </>}
 
     <h4 className="sub-title">临时发一条</h4>
-    <p className="hint">比如“拼团未成功、升级独立成团”这样一次性的通知。也走防封规则，算一次发送。</p>
+    <p className="hint">比如“拼团未成功、升级独立成团”这样一次性的通知，点“发送”马上发。</p>
     <textarea value={message} onChange={event => setMessage(event.target.value)} placeholder="消息内容" />
     <Notice notice={notice} />
     <div className="inline-actions spread">

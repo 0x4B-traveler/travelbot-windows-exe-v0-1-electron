@@ -886,7 +886,7 @@ export class PlanService {
       }
     }
     const maxImages = this.settings().rpa.guard.maxImages;
-    if (messages.some(message => message.imageCount > maxImages)) notes.push(`每条最多附 ${maxImages} 张图（设置里可以改），多的不发`);
+    if (messages.some(message => message.imageCount > maxImages)) notes.push(`每条最多附 ${maxImages} 张图，多的不发`);
     return { messages, weather, notes };
   }
 
