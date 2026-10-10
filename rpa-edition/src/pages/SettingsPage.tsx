@@ -50,18 +50,21 @@ export function SettingsPage() {
             <p className="hint">{saved.pool.role !== 'agent' ? '保存后开始监听。' : agent?.listening ? `正在监听端口 ${agent.port}，等待主控的指令。第一次启动时 Windows 防火墙可能会询问，请选择“允许”。` : `没有在监听：${agent?.error || '请保存后重试'}`}本机的客户端设置只对本机账号生效。</p>
           </div>}
           <Field label="操作哪个客户端" group><div className="radio-row">{(Object.keys(RPA_CLIENT_LABELS) as RpaClient[]).map(value => <label key={value} className="toggle-row"><input type="radio" checked={rpa.client === value} onChange={() => patch({ client: value })} />{RPA_CLIENT_LABELS[value]}</label>)}</div></Field>
-          <Field label="发送方式" group><div className="radio-row">
-            <label className="toggle-row"><input type="radio" checked={rpa.autoSend} onChange={() => patch({ autoSend: true })} />自动发送</label>
-            <label className="toggle-row"><input type="radio" checked={!rpa.autoSend} onChange={() => patch({ autoSend: false })} />只粘贴，人工按发送（试跑用）</label>
-          </div></Field>
-          <div className="form-grid">
-            <Field label="发送键" hint={`和${label}“设置 → 快捷键”里的发送消息保持一致`}><select value={rpa.sendKey} onChange={event => patch({ sendKey: event.target.value as RpaSettings['sendKey'] })}><option value="enter">Enter</option><option value="ctrlEnter">Ctrl + Enter</option></select></Field>
-            <Field label="搜索快捷键" hint="^ 表示 Ctrl，% 表示 Alt，默认 ^f（Ctrl+F）"><input value={rpa.searchHotkey} onChange={event => patch({ searchHotkey: event.target.value })} /></Field>
-            <Field label="每步等待（毫秒）" hint="电脑或网络较慢、搜索结果出来得慢时调大"><input type="number" min={200} max={5000} step={100} value={rpa.stepDelayMs} onChange={event => patch({ stepDelayMs: Number(event.target.value) })} /></Field>
-            <Field label="客户端路径（可选）" hint={`${label}没打开时自动启动，例如 C:\\Program Files\\…\\${rpa.client === 'wecom' ? 'WXWork.exe' : 'Weixin.exe'}`}><input value={rpa.clientPath} onChange={event => patch({ clientPath: event.target.value })} placeholder="留空则需要手动打开客户端" /></Field>
-          </div>
-          <label className="toggle-row"><input type="checkbox" checked={rpa.verifyChat} onChange={event => patch({ verifyChat: event.target.checked })} />发送前核对群名（用 Windows 自带 OCR 识别聊天标题，对不上就不发）</label>
-          <label className="toggle-row"><input type="checkbox" checked={rpa.minimizeAfterSend} onChange={event => patch({ minimizeAfterSend: event.target.checked })} />发送成功后把{label}最小化，切回原来的窗口</label>
+          <details className="advanced-box">
+            <summary>高级（一般不用改）</summary>
+            <Field label="发送方式" group><div className="radio-row">
+              <label className="toggle-row"><input type="radio" checked={rpa.autoSend} onChange={() => patch({ autoSend: true })} />自动发送</label>
+              <label className="toggle-row"><input type="radio" checked={!rpa.autoSend} onChange={() => patch({ autoSend: false })} />只粘贴，人工按发送（试跑用）</label>
+            </div></Field>
+            <div className="form-grid">
+              <Field label="发送键" hint={`和${label}“设置 → 快捷键”里的发送消息保持一致`}><select value={rpa.sendKey} onChange={event => patch({ sendKey: event.target.value as RpaSettings['sendKey'] })}><option value="enter">Enter</option><option value="ctrlEnter">Ctrl + Enter</option></select></Field>
+              <Field label="搜索快捷键" hint="^ 表示 Ctrl，% 表示 Alt，默认 ^f（Ctrl+F）"><input value={rpa.searchHotkey} onChange={event => patch({ searchHotkey: event.target.value })} /></Field>
+              <Field label="每步等待（毫秒）" hint="电脑或网络较慢、搜索结果出来得慢时调大"><input type="number" min={200} max={5000} step={100} value={rpa.stepDelayMs} onChange={event => patch({ stepDelayMs: Number(event.target.value) })} /></Field>
+              <Field label="客户端路径（可选）" hint={`${label}没打开时自动启动，例如 C:\\Program Files\\…\\${rpa.client === 'wecom' ? 'WXWork.exe' : 'Weixin.exe'}`}><input value={rpa.clientPath} onChange={event => patch({ clientPath: event.target.value })} placeholder="留空则需要手动打开客户端" /></Field>
+            </div>
+            <label className="toggle-row"><input type="checkbox" checked={rpa.verifyChat} onChange={event => patch({ verifyChat: event.target.checked })} />发送前核对群名（用 Windows 自带 OCR 识别聊天标题，对不上就不发）</label>
+            <label className="toggle-row"><input type="checkbox" checked={rpa.minimizeAfterSend} onChange={event => patch({ minimizeAfterSend: event.target.checked })} />发送成功后把{label}最小化，切回原来的窗口</label>
+          </details>
           {!isAgent && <AccountPool pool={pool} onChange={setPool} />}
 
       <Notice notice={notice} />

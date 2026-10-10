@@ -171,3 +171,6 @@ textarea.editor-body{min-height:240px}
 .rule-table input,.rule-table select{min-width:0}
 .rule-table td small{display:inline;margin-left:6px}
 .mini-item.static{cursor:default}
+.advanced-box{margin:16px 0 4px;padding:10px 14px;border:1px solid #f1e3d4;border-radius:10px;background:#fffaf5}
+.advanced-box summary{cursor:pointer;font-size:13px;color:#5e4e40}
+.advanced-box[open] summary{margin-bottom:10px}
