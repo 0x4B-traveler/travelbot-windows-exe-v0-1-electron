@@ -145,3 +145,29 @@ textarea.editor-body{min-height:240px}
 .ops-card .sub-title{margin:22px 0 8px;font-size:13px;color:#33251a}
 .ops-card .inline-actions input{flex:1;min-width:0}
 .guard-list{margin:0 0 14px;padding-left:18px;color:#5a4a3c;font-size:12px;line-height:1.9}
+
+/* 路线：按天排 */
+.day-editor{display:flex;flex-direction:column;gap:8px}
+.day-row{display:grid;grid-template-columns:56px 110px minmax(0,1.6fr) minmax(0,1fr) minmax(0,1.4fr) 92px;gap:8px;align-items:start}
+.day-row>strong{padding-top:10px;font-size:12px;color:#5e4e40}
+.day-row.head span{color:#9a8572;font:600 11px Manrope;padding:0 2px}
+.day-row textarea{min-height:42px}
+.day-row .row-actions{display:flex;gap:6px;padding-top:9px;white-space:nowrap}
+.spot-picker{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.spot-picker .chip{display:inline-flex;align-items:center;gap:6px;cursor:default;padding:5px 10px}
+.spot-picker .chip .link{font-size:11px;padding:0}
+.spot-picker select{flex:1;min-width:140px}
+
+/* 一组消息 */
+.message-list{display:flex;flex-direction:column;gap:10px;margin:6px 0 14px}
+.message-card{background:#fffaf5;border:1px solid #ead8c6;border-radius:11px;padding:12px 14px}
+.message-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px}
+.message-head strong{font-size:13px}
+.message-head small{color:#9a8572;font-size:11px}
+.message-card p{margin:0;font-size:13px;line-height:1.7;color:#3d2f24}
+.override-box{margin:0 0 14px;padding:10px 14px;background:#fffaf5;border:1px solid #ead8c6;border-radius:10px;font-size:12px;color:#5e4e40}
+.override-box summary{cursor:pointer}
+.override-box table{margin-top:8px}
+.rule-table input,.rule-table select{min-width:0}
+.rule-table td small{display:inline;margin-left:6px}
+.mini-item.static{cursor:default}

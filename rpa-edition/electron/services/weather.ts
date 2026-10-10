@@ -131,3 +131,15 @@ export function formatForecast(forecast: WeatherForecast, dayLabel: string): str
   const rain = probability === undefined ? '' : `，降水概率 ${Math.round(probability)}%`;
   return `【${forecast.location}${dayLabel}天气】${condition}，${Math.round(forecast.minC)}~${Math.round(forecast.maxC)}°C${rain}。${advice}`;
 }
+
+const TOUR_WEATHER_TEXT: Array<[number[], string]> = [
+  [[0], '晴'], [[1], '晴间多云'], [[2], '多云'], [[3], '阴'], [[45, 48], '雾'],
+  [[51, 53, 55, 56, 57, 61, 80], '小雨'], [[63, 81], '中雨'], [[65, 82], '大雨'], [[66, 67], '冻雨'],
+  [[71, 73, 75, 77, 85, 86], '雪'], [[95, 96, 99], '雷阵雨'],
+];
+
+/** 团的明日提醒用的天气描述：晴、多云、阴、小雨……降水概率高但天气代码不是雨时补一句“转阵雨”。 */
+export function tourWeatherText(code: number, precipitationProbability?: number): string {
+  const text = TOUR_WEATHER_TEXT.find(([codes]) => codes.includes(code))?.[1] ?? '多云';
+  return (precipitationProbability ?? 0) >= 60 && !/雨|雪/.test(text) ? `${text}转阵雨` : text;
+}

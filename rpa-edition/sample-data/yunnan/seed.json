@@ -543,6 +543,42 @@
         "images/r-tengchong-map.jpg",
         "images/guide-tengchong.jpg"
       ]
+    },
+    {
+      "key": "h-kunming",
+      "kind": "hotel",
+      "title": "昆明翠湖片区酒店（示例）",
+      "city": "昆明",
+      "tags": [
+        "酒店",
+        "示例数据"
+      ],
+      "body": "酒店在翠湖边，步行 5 分钟到翠湖公园，楼下有过桥米线和鲜花饼店。早餐 7:00—10:00，次日 8:30 大堂集合。",
+      "images": []
+    },
+    {
+      "key": "h-dali",
+      "kind": "hotel",
+      "title": "大理古城客栈（示例）",
+      "city": "大理",
+      "tags": [
+        "酒店",
+        "示例数据"
+      ],
+      "body": "客栈在古城南门附近，晚上可以逛人民路和洋人街。古城石板路不平，夜里出门注意脚下，贵重物品随身带。",
+      "images": []
+    },
+    {
+      "key": "h-lijiang",
+      "kind": "hotel",
+      "title": "丽江古城客栈（示例）",
+      "city": "丽江",
+      "tags": [
+        "酒店",
+        "示例数据"
+      ],
+      "body": "客栈在古城北门，离大水车步行 10 分钟。丽江早晚温差大，明天上雪山请早点休息，备好厚外套。",
+      "images": []
     }
   ],
   "routes": [
@@ -928,6 +964,74 @@
           "title": "返程",
           "material": "",
           "note": "送机"
+        }
+      ]
+    }
+  ],
+  "tourRoutes": [
+    {
+      "key": "tour-yunnan6",
+      "name": "云南昆明大理丽江6日游",
+      "tags": [
+        "经典",
+        "示例数据"
+      ],
+      "summary": "昆明进、丽江出，石林、洱海、玉龙雪山一次走完。",
+      "days": [
+        {
+          "day": 1,
+          "city": "昆明",
+          "plan": "抵达昆明，下午翠湖公园自由活动",
+          "hotel": "h-kunming",
+          "spots": [
+            "km-cuihu"
+          ]
+        },
+        {
+          "day": 2,
+          "city": "昆明",
+          "plan": "石林风景区，傍晚动车前往大理",
+          "hotel": "h-dali",
+          "spots": [
+            "km-shilin"
+          ]
+        },
+        {
+          "day": 3,
+          "city": "大理",
+          "plan": "崇圣寺三塔、大理古城",
+          "hotel": "h-dali",
+          "spots": [
+            "dl-santa",
+            "dl-gucheng"
+          ]
+        },
+        {
+          "day": 4,
+          "city": "大理",
+          "plan": "洱海生态廊道骑行、喜洲古镇，入住双廊",
+          "hotel": "dl-hotel",
+          "spots": [
+            "dl-erhai"
+          ]
+        },
+        {
+          "day": 5,
+          "city": "丽江",
+          "plan": "玉龙雪山、蓝月谷",
+          "hotel": "h-lijiang",
+          "spots": [
+            "lj-yulong",
+            "lj-lanyue"
+          ]
+        },
+        {
+          "day": 6,
+          "city": "丽江",
+          "plan": "丽江古城、束河古镇，下午返程",
+          "spots": [
+            "lj-gucheng"
+          ]
         }
       ]
     }

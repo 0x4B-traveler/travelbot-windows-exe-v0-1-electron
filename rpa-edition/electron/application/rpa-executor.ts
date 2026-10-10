@@ -9,10 +9,19 @@ export class GuardBlocked extends Error {}
 /** 客户端弹出了安全验证（设备环境异常、要求扫码）：暂停这个账号的全部发送，直到人工验证后“检测本机客户端”通过。 */
 export class ClientLocked extends Error {}
 
-export type RpaSendContext = { taskId?: string; attempt?: number; action?: string; /** 运营任务连发多个群时为 true，群与群之间随机间隔。 */ paced?: boolean };
+export type RpaSendContext = {
+  taskId?: string; attempt?: number; action?: string;
+  /** 连发多个群时为 true，群与群之间随机间隔。 */
+  paced?: boolean;
+  /** 同一个群一晚的一组消息共用一个 batchId：防封只算一次，组内条与条之间只停几秒。 */
+  batchId?: string;
+};
 export type RpaSendResult = { sent: boolean; images: number; detail: string };
 
-type Logger = { write(entry: Omit<LogEntry, 'id' | 'time'>): void; rpaSentSince(account: string, since: Date, groupName?: string): number };
+type Logger = { write(entry: Omit<LogEntry, 'id' | 'time'>): void; rpaSentSince(account: string, since: Date, groupName?: string): number; batchStarted(account: string, batchId: string): boolean };
+
+/** 同一组里条与条之间的停顿（秒），像人工一条条发。 */
+const IN_BATCH_GAP_SEC: [number, number] = [3, 8];
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const randomBetween = (min: number, max: number) => min + Math.random() * Math.max(0, max - min);
@@ -49,6 +58,7 @@ export class RpaExecutor {
   private failures = 0;
   private pausedUntil = 0;
   private lastSentAt = 0;
+  private lastBatchId = '';
   /** 客户端弹出安全验证后的暂停原因，检测客户端通过才清除。 */
   private lockedReason = '';
   /** 同一个账号一次只操作一个群，间隔等待也在队列里，多个任务同时到点时依次执行。 */
@@ -64,11 +74,13 @@ export class RpaExecutor {
   ) {}
 
   /** 防封规则检查：返回拦截原因，可以发时返回 null。 */
-  blockReason(groupName: string | undefined, now: Date): string | null {
+  blockReason(groupName: string | undefined, now: Date, batchId?: string): string | null {
     const guard = this.settings().guard;
     if (this.lockedReason) return `客户端弹出了安全验证，已暂停全部发送。请扫码验证后到“设置”点“检测本机客户端”恢复`;
     if (this.pausedUntil > now.getTime()) return `RPA 连续失败后暂停中，${fmt(new Date(this.pausedUntil))} 后恢复`;
     if (nextActiveStart(guard, now)) return `不在发送时段（${guard.activeStart}–${guard.activeEnd}）`;
+    // 这一组已经发出过一条，已经占过次数，剩下的接着发完
+    if (batchId && this.logs.batchStarted(this.accountId, batchId)) return null;
     if (guard.maxPerHour > 0 && this.logs.rpaSentSince(this.accountId, new Date(now.getTime() - 3600 * 1000)) >= guard.maxPerHour) return `最近一小时已发 ${guard.maxPerHour} 次，达到上限`;
     const today = startOfLocalDay(now);
     if (guard.maxPerDay > 0 && this.logs.rpaSentSince(this.accountId, today) >= guard.maxPerDay) return `今天已发 ${guard.maxPerDay} 次，达到每日上限`;
@@ -118,15 +130,16 @@ export class RpaExecutor {
   private async sendNow(groupName: string, text: string, images: string[], context: RpaSendContext): Promise<RpaSendResult> {
     const settings = this.settings(); const guard = settings.guard;
     const label = RPA_CLIENT_LABELS[settings.client];
-    const base = { module: 'RPA' as const, taskId: context.taskId, groupName, attempt: context.attempt, account: this.accountId, action: context.action ?? '发送' };
-    const blocked = this.blockReason(groupName, new Date());
+    const base = { module: 'RPA' as const, taskId: context.taskId, groupName, attempt: context.attempt, account: this.accountId, batchId: context.batchId, action: context.action ?? '发送' };
+    const blocked = this.blockReason(groupName, new Date(), context.batchId);
     if (blocked) {
       this.logs.write({ ...base, status: 'fail', message: `防封规则：${blocked}，本次未发送` });
       throw new GuardBlocked(`防封规则：${blocked}，本次未发送`);
     }
-    // 连发多个群时，群与群之间随机停一会儿，像人一样一个个发
-    if (context.paced && this.lastSentAt) {
-      const gapMs = randomBetween(guard.groupGapMinSec, Math.max(guard.groupGapMinSec, guard.groupGapMaxSec)) * 1000;
+    // 同一组里条与条之间停几秒；换群时随机停一会儿，像人一样一个个发
+    const sameBatch = Boolean(context.batchId) && context.batchId === this.lastBatchId;
+    if ((sameBatch || context.paced) && this.lastSentAt) {
+      const gapMs = (sameBatch ? randomBetween(...IN_BATCH_GAP_SEC) : randomBetween(guard.groupGapMinSec, Math.max(guard.groupGapMinSec, guard.groupGapMaxSec))) * 1000;
       const wait = this.lastSentAt + gapMs - Date.now();
       if (wait > 0) await sleep(wait);
     }
@@ -153,6 +166,7 @@ export class RpaExecutor {
       throw error;
     } finally {
       this.lastSentAt = Date.now();
+      this.lastBatchId = context.batchId ?? '';
     }
   }
 }

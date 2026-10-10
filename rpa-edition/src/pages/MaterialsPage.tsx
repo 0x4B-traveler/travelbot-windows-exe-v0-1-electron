@@ -1,13 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { call, formatTime } from '../api';
 import { MATERIAL_KIND_LABELS, MATERIAL_SOURCE_LABELS, type Material, type MaterialInput, type MaterialKind, type MaterialQuery } from '../domain/ops';
-import { Card, Empty, Field, Modal, Notice, splitTags, useAction, useLoad } from '../ui';
+import { Card, Empty, Field, Modal, Notice, splitTags, Tabs, useAction, useLoad } from '../ui';
+import { RoutesPanel } from './RoutesPage';
 
 const KINDS = Object.keys(MATERIAL_KIND_LABELS) as MaterialKind[];
-const IMPORT_SAMPLE = '名称\t类型\t城市\t标签\t简介\n故宫\t景点\t北京\t历史,亲子\t明清两代的皇家宫殿\n古北水镇\t景点\t北京\t古镇,周末\t长城脚下的北方水乡';
+const IMPORT_SAMPLE = '名称\t类型\t城市\t标签\t简介\n石林风景区\t景点\t昆明\t世界遗产\t喀斯特地貌奇观，步行约 3 小时，穿舒适的鞋\n昆明翠湖片区酒店\t酒店\t昆明\t\t步行 5 分钟到翠湖公园，楼下有过桥米线';
+type Tab = 'routes' | 'materials';
 
-/** 素材库：只负责“有什么”，不规划路线、不写文案、不发送。 */
+/** 素材库：路线是核心（固定的几天行程），酒店和景点攻略是路线里引用的素材。 */
 export function MaterialsPage() {
+  const [tab, setTab] = useState<Tab>('routes');
+  return <>
+    <Tabs<Tab> value={tab} onChange={setTab} options={[{ value: 'routes', label: '路线' }, { value: 'materials', label: '酒店和景点' }]} />
+    {tab === 'routes' ? <RoutesPanel /> : <MaterialsPanel />}
+  </>;
+}
+
+/** 酒店（发“酒店及周边TIPS”用的介绍）、景点（发“游玩攻略”用的一句话和攻略图）等素材。 */
+function MaterialsPanel() {
   const [query, setQuery] = useState<MaterialQuery>({});
   const [text, setText] = useState('');
   const [items, error, reload] = useLoad(() => call('material.list', query), [query]);
@@ -20,10 +31,11 @@ export function MaterialsPage() {
 
   return <>
     <Card title={`素材（${items?.length ?? 0}）`} extra={<div className="inline-actions"><button className="secondary" onClick={() => run(async () => {
-        if (!window.confirm('导入云南示例数据？会新增约 37 条素材（含攻略图、路线图）、6 条路线和 6 条已审核的群文案，已存在的会跳过。')) return '';
-        const result = await call('sample.load', { name: 'yunnan' });
+        if (!window.confirm('导入云南示例数据？会新增约 40 条素材（景点攻略带图、酒店）和一条“云南昆明大理丽江6日游”路线，已存在的会跳过。')) return '';
+        const testTour = window.confirm('要不要再建一个测试团？\n\n群是你自己的“文件传输助手”，明天出发，今天傍晚开始每天会把这个团的消息发到文件传输助手，不会发到任何客户群。\n\n点“确定”建测试团，点“取消”只导入数据。');
+        const result = await call('sample.load', { name: 'yunnan', testTour });
         await refresh();
-        return `已导入${result.name}：素材 ${result.materials} 条、图片 ${result.images} 张、路线 ${result.routes} 条、群文案 ${result.contents} 条${result.skipped ? `，跳过已存在 ${result.skipped} 项` : ''}。建排期任务时天气城市可填：${result.weatherCities.join('；')}`;
+        return `已导入${result.name}：素材 ${result.materials} 条、图片 ${result.images} 张、路线 ${result.routes} 条${result.skipped ? `，跳过已存在 ${result.skipped} 项` : ''}。${result.tour ? `测试团“${result.tour.groupName}”${result.tour.startDate}出发，可以在群管理里看。` : ''}`;
       })}>导入云南示例数据</button><button className="secondary" onClick={() => setImporting(true)}>导入</button><button className="primary" onClick={() => setEditing({ kind: 'spot', title: '', body: '', city: '', tags: [] })}>新增素材</button></div>}>
       <div className="filter-row">
         <input value={text} placeholder="搜索名称、简介、标签" onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') setQuery({ ...query, text }); }} />
@@ -41,7 +53,7 @@ export function MaterialsPage() {
           <td>{MATERIAL_KIND_LABELS[item.kind]}</td><td>{item.city || '—'}</td><td>{item.tags.join(' / ') || '—'}</td>
           <td>{MATERIAL_SOURCE_LABELS[item.source]}</td><td className="mono">{formatTime(item.updatedAt)}</td>
         </tr>)}</tbody>
-      </table> : items && <Empty>{Object.values(query).some(Boolean) ? '没有符合条件的素材。' : '素材库还是空的。点击右上角“新增素材”，或从 Excel 导入。'}</Empty>}
+      </table> : items && <Empty>{Object.values(query).some(Boolean) ? '没有符合条件的素材。' : '还没有酒店和景点。点右上角“新增素材”，或从 Excel 导入；景点要上传攻略图，酒店写好周边TIPS。'}</Empty>}
     </Card>
 
     {detail && <MaterialDetail material={detail} onClose={() => setDetail(null)} onEdit={() => { setEditing({ id: detail.id, kind: detail.kind, title: detail.title, body: detail.body, city: detail.city, tags: detail.tags }); setDetail(null); }}
@@ -113,7 +125,7 @@ function MaterialEditor({ input, onClose, onSaved }: { input: MaterialInput; onC
       <Field label="城市"><input value={draft.city} placeholder="例如：北京" onChange={event => setDraft({ ...draft, city: event.target.value })} /></Field>
       <Field label="标签" hint="用逗号分隔"><input value={tags} placeholder="亲子，周末，古镇" onChange={event => setTags(event.target.value)} /></Field>
     </div>
-    <Field label="简介"><textarea className="tall" value={draft.body} onChange={event => setDraft({ ...draft, body: event.target.value })} /></Field>
+    <Field label={draft.kind === 'hotel' ? '酒店介绍和周边TIPS' : draft.kind === 'spot' || draft.kind === 'guide' ? '游玩攻略' : '简介'} hint={draft.kind === 'hotel' ? '发“酒店及周边TIPS”时原样发出' : draft.kind === 'spot' || draft.kind === 'guide' ? '发“游玩攻略”时原样发出，攻略图保存后在详情里添加' : undefined}><textarea className="tall" value={draft.body} onChange={event => setDraft({ ...draft, body: event.target.value })} /></Field>
     <Notice notice={notice} />
     <div className="inline-actions end"><button className="secondary" onClick={onClose}>取消</button><button className="primary" disabled={busy || !draft.title.trim()} onClick={() => void run(async () => { await onSaved(await call('material.save', { ...draft, tags: splitTags(tags) })); })}>保存</button></div>
   </Modal>;

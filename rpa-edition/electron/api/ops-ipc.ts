@@ -1,13 +1,17 @@
 import { ipcMain } from 'electron';
-import type { OpsApi, OpsMethod, OpsResponse } from '../../src/domain/ops';
+import type { BackupResult, OpsApi, OpsMethod, OpsResponse } from '../../src/domain/ops';
 import type { SampleDataService } from '../application/sample-data';
-import { OpsError, type ContentService, type DashboardService, type GroupService, type LogService, type MailAlertService, type MaterialService, type RouteService, type SendSettingsService, type TaskService } from '../application/services';
+import { OpsError, type DashboardService, type GroupService, type LogService, type MailAlertService, type MaterialService, type PlanService, type RouteService, type SendSettingsService, type TemplateService } from '../application/services';
 
 // API 层：界面只能通过这一个 IPC 通道调用 Service，不能直接访问 SQLite 或桌面客户端。
-export type OpsServices = { dashboard: DashboardService; materials: MaterialService; routes: RouteService; contents: ContentService; tasks: TaskService; groups: GroupService; logs: LogService; sendSettings: SendSettingsService; mail: MailAlertService; samples: SampleDataService };
+export type BackupApi = { export(): Promise<BackupResult | null>; restore(): Promise<string | null> };
+export type OpsServices = {
+  dashboard: DashboardService; materials: MaterialService; routes: RouteService; templates: TemplateService; plans: PlanService; groups: GroupService;
+  logs: LogService; sendSettings: SendSettingsService; mail: MailAlertService; samples: SampleDataService; backup: BackupApi;
+};
 
 export function registerOpsApi(services: OpsServices) {
-  const { dashboard, materials, routes, contents, tasks, groups, logs, sendSettings, mail, samples } = services;
+  const { dashboard, materials, routes, templates, plans, groups, logs, sendSettings, mail, samples, backup } = services;
   const handlers: { [K in OpsMethod]: (args: any) => ReturnType<OpsApi[K]> | Awaited<ReturnType<OpsApi[K]>> } = {
     'dashboard.get': () => dashboard.get(),
 
@@ -19,37 +23,32 @@ export function registerOpsApi(services: OpsServices) {
     'material.addImages': ({ id }) => materials.addImages(id),
     'material.removeImage': ({ id, imageId }) => materials.removeImage(id, imageId),
     'material.imageData': ({ imageId }) => materials.imageData(imageId),
-    'sample.load': ({ name }) => samples.load(String(name ?? '')),
-    'sample.planWeek': input => samples.planWeek(input),
-    'sample.planDaily': input => samples.planDaily(input),
+    'sample.load': ({ name, testTour }) => samples.load(String(name ?? ''), Boolean(testTour)),
 
     'route.list': query => routes.list(query ?? {}),
     'route.save': input => routes.save(input),
     'route.delete': ({ id }) => routes.delete(id),
+    'route.parseDays': ({ text }) => routes.parseDays(String(text ?? '')),
 
-    'content.list': query => contents.list(query?.status),
-    'content.versions': ({ id }) => contents.versions(id),
-    'content.save': input => contents.save(input),
-    'content.generate': input => contents.generate(input),
-    'content.regenerate': ({ id }) => contents.regenerate(id),
-    'content.submit': ({ id }) => contents.submit(id),
-    'content.approve': ({ id }) => contents.approve(id),
-    'content.reject': ({ id }) => contents.reject(id),
-    'content.delete': ({ id }) => contents.delete(id),
+    'template.list': () => templates.list(),
+    'template.save': ({ key, body }) => templates.save(key, body),
+    'template.reset': ({ key }) => templates.reset(key),
+    'weatherRule.list': () => templates.weatherRules(),
+    'weatherRule.save': ({ rules }) => templates.saveWeatherRules(rules),
+    'weatherRule.test': ({ city, date }) => templates.test(String(city ?? ''), String(date ?? '')),
 
-    'task.list': query => tasks.list(query?.status),
-    'task.create': input => tasks.create(input),
-    'task.cancel': ({ id }) => tasks.cancel(id),
-    'task.retry': ({ id }) => tasks.retry(id),
-    'task.runNow': ({ id }) => tasks.runNow(id),
-    'task.delete': ({ id }) => tasks.delete(id),
-    'task.runs': ({ id }) => tasks.runs(id),
-    'task.dryRun': input => tasks.dryRun(input),
+    'plan.list': query => plans.list(query ?? {}),
+    'plan.preview': ({ groupId, date }) => plans.preview(groupId, date),
+    'plan.skip': ({ groupId, date }) => plans.skip(groupId, date),
+    'plan.unskip': ({ groupId, date }) => plans.unskip(groupId, date),
+    'plan.retry': ({ id }) => plans.retry(id),
+    'plan.sendNow': ({ groupId, date }) => plans.sendNow(groupId, date),
+    'plan.sendToSelf': ({ groupId, date }) => plans.sendToSelf(groupId, date),
 
     'group.list': () => groups.list(),
+    'group.add': input => groups.add(input),
     'group.update': input => groups.update(input),
-    'group.testSend': ({ id, text }) => groups.testSend(id, String(text ?? '')),
-    'group.add': ({ names, accountId }) => groups.add(names, accountId),
+    'group.sendMessage': ({ id, text }) => plans.sendMessage(id, String(text ?? '')),
     'group.delete': ({ id }) => groups.delete(id),
 
     'settings.getSend': () => sendSettings.get(),
@@ -60,6 +59,9 @@ export function registerOpsApi(services: OpsServices) {
     'settings.getMail': () => mail.get(),
     'settings.saveMail': input => mail.save(input),
     'settings.testMail': input => mail.test(input),
+
+    'backup.export': () => backup.export(),
+    'backup.restore': () => backup.restore(),
 
     'log.list': query => logs.list(query ?? {}),
   };

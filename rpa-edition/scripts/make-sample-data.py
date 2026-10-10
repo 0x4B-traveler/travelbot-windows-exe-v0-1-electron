@@ -8,6 +8,7 @@ import json
 import math
 import os
 import random
+import sys
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'sample-data', 'yunnan')
@@ -290,6 +291,37 @@ def route_map(route):
     return image
 
 
+# 改版后的示例：一条按天排好的路线（城市、行程、当晚酒店、要发的景点攻略），酒店只有文字介绍。
+TOUR_HOTELS = [
+    ('h-kunming', '昆明翠湖片区酒店（示例）', '昆明', '酒店在翠湖边，步行 5 分钟到翠湖公园，楼下有过桥米线和鲜花饼店。早餐 7:00—10:00，次日 8:30 大堂集合。'),
+    ('h-dali', '大理古城客栈（示例）', '大理', '客栈在古城南门附近，晚上可以逛人民路和洋人街。古城石板路不平，夜里出门注意脚下，贵重物品随身带。'),
+    ('dl-hotel', None, None, None),
+    ('h-lijiang', '丽江古城客栈（示例）', '丽江', '客栈在古城北门，离大水车步行 10 分钟。丽江早晚温差大，明天上雪山请早点休息，备好厚外套。'),
+]
+TOUR_ROUTE = {
+    'key': 'tour-yunnan6', 'name': '云南昆明大理丽江6日游', 'tags': ['经典', TAG],
+    'summary': '昆明进、丽江出，石林、洱海、玉龙雪山一次走完。',
+    'days': [
+        {'day': 1, 'city': '昆明', 'plan': '抵达昆明，下午翠湖公园自由活动', 'hotel': 'h-kunming', 'spots': ['km-cuihu']},
+        {'day': 2, 'city': '昆明', 'plan': '石林风景区，傍晚动车前往大理', 'hotel': 'h-dali', 'spots': ['km-shilin']},
+        {'day': 3, 'city': '大理', 'plan': '崇圣寺三塔、大理古城', 'hotel': 'h-dali', 'spots': ['dl-santa', 'dl-gucheng']},
+        {'day': 4, 'city': '大理', 'plan': '洱海生态廊道骑行、喜洲古镇，入住双廊', 'hotel': 'dl-hotel', 'spots': ['dl-erhai']},
+        {'day': 5, 'city': '丽江', 'plan': '玉龙雪山、蓝月谷', 'hotel': 'h-lijiang', 'spots': ['lj-yulong', 'lj-lanyue']},
+        {'day': 6, 'city': '丽江', 'plan': '丽江古城、束河古镇，下午返程', 'spots': ['lj-gucheng']},
+    ],
+}
+
+
+def add_tour(seed):
+    """把改版用的酒店和按天路线加进 seed（重复运行不重复加）。"""
+    keys = {item['key'] for item in seed['materials']}
+    for key, title, city, body in TOUR_HOTELS:
+        if title and key not in keys:
+            seed['materials'].append({'key': key, 'kind': 'hotel', 'title': title, 'city': city, 'tags': ['酒店', TAG], 'body': body, 'images': []})
+    seed['tourRoutes'] = [TOUR_ROUTE]
+    return seed
+
+
 def save(image, name):
     image.save(os.path.join(IMAGES, name), 'JPEG', quality=82, optimize=True)
     return f'images/{name}'
@@ -320,11 +352,20 @@ def main():
             route_items.append({'day': day, 'time': time, 'title': title, 'material': linked, 'note': note})
         routes.append({'key': key, 'name': name, 'city': city, 'days': days, 'tags': tags, 'summary': summary,
                        'weatherCity': weather, 'items': route_items})
-    seed = {'name': '云南示例数据', 'tag': TAG, 'materials': materials, 'routes': routes}
+    seed = add_tour({'name': '云南示例数据', 'tag': TAG, 'materials': materials, 'routes': routes})
     with open(os.path.join(ROOT, 'seed.json'), 'w', encoding='utf-8') as handle:
         json.dump(seed, handle, ensure_ascii=False, indent=2)
     print(f'{len(materials)} materials, {len(routes)} routes, {len(os.listdir(IMAGES))} images')
 
 
 if __name__ == '__main__':
-    main()
+    if '--tour-only' in sys.argv:
+        # 只更新 seed.json 里的改版示例，不重新画图
+        path = os.path.join(ROOT, 'seed.json')
+        with open(path, encoding='utf-8') as handle:
+            current = json.load(handle)
+        with open(path, 'w', encoding='utf-8') as handle:
+            json.dump(add_tour(current), handle, ensure_ascii=False, indent=2)
+        print('seed.json updated')
+    else:
+        main()

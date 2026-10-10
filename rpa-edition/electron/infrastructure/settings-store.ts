@@ -1,9 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { builtInGuard, DEFAULT_SEND_SETTINGS, type SendSettings } from '../../src/domain/ops';
+import { builtInGuard, DEFAULT_SEND_SETTINGS, DEFAULT_TOUR_SCHEDULE, type SendSettings } from '../../src/domain/ops';
 import type { SendSettingsStore } from '../application/ports';
 
-/** RPA 设置存成 userData 下的一个 JSON 文件，缺字段时用默认值补齐；防封规则总是用内置值（旧版本存的自定义值不再生效）。 */
+/** RPA 设置和团的每日发送时间存成 userData 下的一个 JSON 文件，缺字段时用默认值补齐；防封规则总是用内置值（旧版本存的自定义值不再生效）。 */
 export class JsonSendSettingsStore implements SendSettingsStore {
   constructor(private readonly path: string) {}
 
@@ -13,6 +13,7 @@ export class JsonSendSettingsStore implements SendSettingsStore {
       return {
         rpa: { ...DEFAULT_SEND_SETTINGS.rpa, ...(raw?.rpa ?? {}), guard: builtInGuard(raw?.rpa?.guard) },
         pool: { ...DEFAULT_SEND_SETTINGS.pool, ...(raw?.pool ?? {}), accounts: Array.isArray(raw?.pool?.accounts) && raw.pool.accounts.length ? raw.pool.accounts : DEFAULT_SEND_SETTINGS.pool.accounts },
+        tour: { ...DEFAULT_TOUR_SCHEDULE, ...(raw?.tour ?? {}) },
       };
     } catch { return structuredClone(DEFAULT_SEND_SETTINGS); }
   }

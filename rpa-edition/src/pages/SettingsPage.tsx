@@ -1,25 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { call } from '../api';
-import { DEFAULT_AGENT_PORT, DEFAULT_RPA_GUARD, POOL_ROLE_LABELS, RPA_CLIENT_LABELS, type AccountStatus, type MailSettingsView, type PoolRole, type PoolSettings, type RpaAccount, type RpaClient, type RpaGuard, type RpaSettings, type SendSettings } from '../domain/ops';
+import { DEFAULT_AGENT_PORT, DEFAULT_RPA_GUARD, POOL_ROLE_LABELS, RPA_CLIENT_LABELS, type AccountStatus, type MailSettingsView, type PoolRole, type PoolSettings, type RpaAccount, type RpaClient, type RpaGuard, type RpaSettings, type SendSettings, type TourScheduleSettings } from '../domain/ops';
 import { Card, Field, Notice, useAction } from '../ui';
 
-/** 设置：RPA 发送（桌面客户端、发送时段、账号池），保存后立即生效；防封规则内置，只展示不可改。不属于核心业务模块。 */
+/** 设置：团的发送时间、RPA 发送（桌面客户端、发送时段、账号池）、提醒邮件和备份，保存后立即生效；防封规则内置，只展示不可改。 */
 export function SettingsPage() {
   const [saved, setSaved] = useState<SendSettings | null>(null);
   const [rpa, setRpa] = useState<RpaSettings | null>(null);
   const [pool, setPool] = useState<PoolSettings | null>(null);
+  const [tour, setTour] = useState<TourScheduleSettings | null>(null);
   const [agent, setAgent] = useState<Awaited<ReturnType<typeof loadAgent>> | null>(null);
   const { busy, notice, run } = useAction();
-  const apply = (value: SendSettings) => { setSaved(value); setRpa(value.rpa); setPool(value.pool); };
+  const apply = (value: SendSettings) => { setSaved(value); setRpa(value.rpa); setPool(value.pool); setTour(value.tour); };
   useEffect(() => { void call('settings.getSend').then(apply); void loadAgent().then(setAgent); }, []);
-  if (!saved || !rpa || !pool) return <Card title="RPA 发送"><p className="hint">正在加载…</p></Card>;
+  if (!saved || !rpa || !pool || !tour) return <Card title="RPA 发送"><p className="hint">正在加载…</p></Card>;
   const patch = (next: Partial<RpaSettings>) => setRpa({ ...rpa, ...next });
   const guard = rpa.guard;
   const patchGuard = (next: Partial<RpaGuard>) => setRpa({ ...rpa, guard: { ...guard, ...next } });
   const num = (key: keyof RpaGuard) => (event: React.ChangeEvent<HTMLInputElement>) => patchGuard({ [key]: Number(event.target.value) } as Partial<RpaGuard>);
-  const dirty = JSON.stringify(rpa) !== JSON.stringify(saved.rpa) || JSON.stringify(pool) !== JSON.stringify(saved.pool);
+  const dirty = JSON.stringify(rpa) !== JSON.stringify(saved.rpa) || JSON.stringify(pool) !== JSON.stringify(saved.pool) || JSON.stringify(tour) !== JSON.stringify(saved.tour);
   const save = () => void run(async () => {
-    const next = await call('settings.saveSend', { rpa, pool });
+    const next = await call('settings.saveSend', { rpa, pool, tour });
     apply(next);
     // 执行端的局域网服务是异步启动的，稍等再读状态
     window.setTimeout(() => void loadAgent().then(setAgent), 800);
@@ -27,7 +28,17 @@ export function SettingsPage() {
   });
   const isAgent = pool.role === 'agent';
   const label = RPA_CLIENT_LABELS[rpa.client];
+  const lateStart = tour.eveningStart < guard.activeStart || tour.eveningStart >= guard.activeEnd;
   return <>
+    {!isAgent && <Card title="团的发送时间">
+      <p className="hint">每天到了这个时间，按顺序给每个进行中的团发“明日提醒”这一组，群与群之间随机隔 {DEFAULT_RPA_GUARD.groupGapMinSec}–{DEFAULT_RPA_GUARD.groupGapMaxSec} 秒。按每小时 {DEFAULT_RPA_GUARD.maxPerHour} 组算，30 个群大约 3 小时发完；群更多时把开始时间提前，或者加一台电脑（账号池）。</p>
+      <div className="form-grid">
+        <Field label="每天傍晚开始发送"><input type="time" value={tour.eveningStart} onChange={event => setTour({ ...tour, eveningStart: event.target.value })} /></Field>
+        <Field label="开机自动启动" group hint="电脑重启后自动在后台运行（安装版 Windows 有效）"><label className="toggle-row"><input type="checkbox" checked={tour.launchAtLogin} onChange={event => setTour({ ...tour, launchAtLogin: event.target.checked })} />开机后自动启动并最小化到托盘</label></Field>
+      </div>
+      {lateStart && <p className="notice error">开始时间不在下面的发送时段（{guard.activeStart}–{guard.activeEnd}）里，到点也发不出去，请调整其中一个。</p>}
+      <div className="actions"><button className="primary" disabled={busy || !dirty} onClick={save}>保存</button></div>
+    </Card>}
     <Card title="RPA 发送">
           <p className="hint">程序会自动操作已登录的{label}：切到前台 → 搜索群名 → 进入群聊 → 粘贴内容 → 发送。不调用企业微信接口，群在“群管理”里按群名添加。发送时会占用屏幕和剪贴板几秒钟，电脑锁屏时无法发送；程序会进入搜索结果的第一个，开启“发送前核对群名”后进错群不会发。</p>
           <Field label="本机角色" group hint="一个企业微信账号只能稳定登录一台电脑，多个账号就用多台电脑：一台主控管内容、任务和群，其他电脑做执行端，各自用自己的账号发。"><div className="radio-row">{(Object.keys(POOL_ROLE_LABELS) as PoolRole[]).map(value => <label key={value} className="toggle-row"><input type="radio" checked={pool.role === value} onChange={() => setPool({ ...pool, role: value })} />{POOL_ROLE_LABELS[value]}{value === 'master' ? '（管内容、任务和群）' : '（只接收主控的发送指令）'}</label>)}</div></Field>
@@ -57,8 +68,8 @@ export function SettingsPage() {
           <p className="hint">按真人的节奏发，下面的规则一直生效，不能调高：</p>
           <ul className="guard-list">
             <li>每一步操作随机停顿，群与群之间随机间隔 {DEFAULT_RPA_GUARD.groupGapMinSec}–{DEFAULT_RPA_GUARD.groupGapMaxSec} 秒</li>
-            <li>每小时最多 {DEFAULT_RPA_GUARD.maxPerHour} 次，每天最多 {DEFAULT_RPA_GUARD.maxPerDay} 次，同一个群每天最多 {DEFAULT_RPA_GUARD.maxPerGroupPerDay} 次（发到一个群算一次）</li>
-            <li>开头随机加一句问候，让多个群收到的文字不完全一样；每次最多附 {DEFAULT_RPA_GUARD.maxImages} 张图</li>
+            <li>每小时最多 {DEFAULT_RPA_GUARD.maxPerHour} 次，每天最多 {DEFAULT_RPA_GUARD.maxPerDay} 次，同一个群每天最多 {DEFAULT_RPA_GUARD.maxPerGroupPerDay} 次；一个团一晚的一组消息算一次，组内条与条之间随机停几秒</li>
+            <li>每条消息最多附 {DEFAULT_RPA_GUARD.maxImages} 张图</li>
             <li>连续失败 {DEFAULT_RPA_GUARD.pauseAfterFailures} 次自动暂停 {DEFAULT_RPA_GUARD.pauseMinutes} 分钟</li>
             <li>发送前后检查{label}有没有弹出“安全验证 / 设备环境异常”，一旦弹出就暂停全部发送并通知，扫码验证后点“检测本机客户端”恢复</li>
           </ul>
@@ -66,7 +77,7 @@ export function SettingsPage() {
             <Field label="发送时段" hint="时段外到点的任务顺延到下一个时段开始">
               <div className="inline-actions"><input type="time" value={guard.activeStart} onChange={event => patchGuard({ activeStart: event.target.value })} /><span>到</span><input type="time" value={guard.activeEnd} onChange={event => patchGuard({ activeEnd: event.target.value })} /></div>
             </Field>
-            <Field label="每次附带攻略图（张）" hint={`取内容关联路线里素材的图片，0 表示只发文字，最多 ${DEFAULT_RPA_GUARD.maxImages} 张`}><input type="number" min={0} max={DEFAULT_RPA_GUARD.maxImages} value={guard.maxImages} onChange={num('maxImages')} /></Field>
+            <Field label="每条最多附图（张）" hint={`景点攻略图、酒店图片，0 表示只发文字，最多 ${DEFAULT_RPA_GUARD.maxImages} 张`}><input type="number" min={0} max={DEFAULT_RPA_GUARD.maxImages} value={guard.maxImages} onChange={num('maxImages')} /></Field>
           </div>
           <p className="hint">另外请做到：用一台专用的实体电脑长期登录，不开远程控制、录屏和抓包工具；发送时不要有人操作这台电脑；新账号前一两周少发，可以先用“只粘贴，人工按发送”。</p>
           {!isAgent && <AccountPool pool={pool} onChange={setPool} />}
@@ -78,6 +89,7 @@ export function SettingsPage() {
       </div>
     </Card>
     <MailCard />
+    {!isAgent && <BackupCard />}
   </>;
 }
 
@@ -110,6 +122,25 @@ function MailCard() {
 }
 
 const loadAgent = () => call('settings.agentInfo');
+
+/** 备份：数据都在这台电脑的 SQLite 里，定期导出一份存到别处（U 盘、网盘）。 */
+function BackupCard() {
+  const { busy, notice, run } = useAction();
+  return <Card title="数据备份">
+    <p className="hint">路线、酒店和景点（含攻略图）、群和团、模板、天气对照表和发送记录都存在这台电脑上。建议每周导出一份备份，存到 U 盘或网盘；换电脑时在新电脑上“从备份恢复”。设置和邮箱授权码不在备份里。</p>
+    <Notice notice={notice} />
+    <div className="actions">
+      <button className="secondary" disabled={busy} onClick={() => void run(async () => {
+        const result = await call('backup.restore');
+        return result ? '正在恢复，程序马上重启' : '';
+      })}>从备份恢复</button>
+      <button className="primary" disabled={busy} onClick={() => void run(async () => {
+        const result = await call('backup.export');
+        return result ? `已导出到 ${result.path}：路线 ${result.routes} 条、群 ${result.groups} 个、素材 ${result.materials} 条、图片 ${result.images} 张` : '';
+      })}>导出备份</button>
+    </div>
+  </Card>;
+}
 
 /** 账号池（主控）：本机账号 + 局域网里的执行端。群在“群管理”里绑定账号，没绑定的用第一个可用账号。 */
 function AccountPool({ pool, onChange }: { pool: PoolSettings; onChange: (next: PoolSettings) => void }) {

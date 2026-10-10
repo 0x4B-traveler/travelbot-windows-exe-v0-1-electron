@@ -1,4 +1,4 @@
-import type { AccountStatus, ContentChannel, MailSettings, Material, Route, RpaSettings, SendSettings } from '../../src/domain/ops';
+import type { AccountStatus, DayWeather, MailSettings, RpaSettings, SendSettings } from '../../src/domain/ops';
 import type { RpaSendContext, RpaSendResult } from './rpa-executor';
 
 // Application 层依赖的外部能力（端口）。具体实现放在 Infrastructure，由 main.ts 组装注入，
@@ -41,8 +41,8 @@ export interface SendSettingsStore {
 }
 
 export interface WeatherGateway {
-  /** 返回一行可直接拼进消息的天气预报文字。 */
-  forecastLine(city: string, date: Date): Promise<string>;
+  /** 某个城市某天（YYYY-MM-DD，当地日期）的天气：天气描述和最低、最高气温。查不到时抛错。 */
+  forecast(city: string, date: string): Promise<DayWeather>;
 }
 
 export interface FileStore {
@@ -54,12 +54,4 @@ export interface FileStore {
 
 export interface FilePicker {
   pickImages(): Promise<string[]>;
-}
-
-export type GeneratedContent = { title: string; body: string };
-
-export interface ContentGenerator {
-  readonly source: 'ai' | 'template';
-  /** variant 用于“重新生成”时换一种写法。 */
-  generate(input: { route: Route; materials: Material[]; channel: ContentChannel; variant: number }): Promise<GeneratedContent>;
 }

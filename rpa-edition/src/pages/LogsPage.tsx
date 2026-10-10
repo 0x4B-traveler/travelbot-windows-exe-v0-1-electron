@@ -3,7 +3,7 @@ import { call } from '../api';
 import type { LogEntry, LogModule, LogQuery, LogStatus } from '../domain/ops';
 import { Card, Empty, Modal, Pill, useLoad } from '../ui';
 
-const MODULES: Array<[LogModule, string]> = [['Scheduler', '调度'], ['Task', '任务'], ['RPA', 'RPA'], ['Content', '内容'], ['Group', '群'], ['Itinerary', '行程提醒'], ['DailyPush', '每日推送'], ['System', '系统']];
+const MODULES: Array<[LogModule, string]> = [['Plan', '发送计划'], ['RPA', 'RPA'], ['Tour', '团'], ['Group', '群'], ['Content', '素材'], ['Scheduler', '调度'], ['System', '系统'], ['Task', '旧版任务'], ['Itinerary', '旧版行程提醒'], ['DailyPush', '旧版每日推送']];
 const MODULE_LABEL = Object.fromEntries(MODULES) as Record<LogModule, string>;
 const STATUS: Record<LogStatus, { tone: 'ok' | 'fail' | 'info'; text: string }> = { ok: { tone: 'ok', text: '✓' }, fail: { tone: 'fail', text: '✕' }, info: { tone: 'info', text: '·' } };
 
@@ -17,7 +17,7 @@ export function LogsPage() {
       <div className="filter-row">
         <select value={query.module ?? ''} onChange={event => setQuery({ ...query, module: (event.target.value || undefined) as LogModule | undefined })}><option value="">全部模块</option>{MODULES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
         <select value={query.status ?? ''} onChange={event => setQuery({ ...query, status: (event.target.value || undefined) as LogStatus | undefined })}><option value="">全部结果</option><option value="ok">成功</option><option value="fail">失败</option><option value="info">信息</option></select>
-        {query.taskId && <button className="chip active" onClick={() => setQuery({ ...query, taskId: undefined })}>只看一个任务 ✕</button>}
+        {query.taskId && <button className="chip active" onClick={() => setQuery({ ...query, taskId: undefined })}>只看一组 ✕</button>}
       </div>
       {error && <p className="notice error">{error}</p>}
       {logs?.length ? <table className="ops-table clickable compact">
@@ -36,7 +36,7 @@ export function LogsPage() {
         <dt>操作</dt><dd>{open.action}</dd>
         <dt>结果</dt><dd>{open.status === 'ok' ? '成功' : open.status === 'fail' ? '失败' : '信息'}：{open.message}</dd>
         {open.groupName && <><dt>群</dt><dd>{open.groupName}</dd></>}
-        {open.taskId && <><dt>任务 ID</dt><dd className="mono">{open.taskId} <button className="link" onClick={() => { setQuery({ ...query, taskId: open.taskId }); setOpen(null); }}>只看这个任务</button></dd></>}
+        {open.taskId && <><dt>编号</dt><dd className="mono">{open.taskId} <button className="link" onClick={() => { setQuery({ ...query, taskId: open.taskId }); setOpen(null); }}>只看这一组</button></dd></>}
         {open.attempt && <><dt>第几次执行</dt><dd>{open.attempt}</dd></>}
         {open.detail && <><dt>详细信息</dt><dd className="pre mono">{open.detail}</dd></>}
       </dl>
